@@ -26,14 +26,16 @@ def env_list(name: str, default: str = ""):
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+# Django requires SECRET_KEY for signing cookies/sessions/CSRF. Set it via .env.
+# (Older .env files may still use DJANGO_SECRET_KEY — both are accepted.)
+SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("DJANGO_SECRET_KEY", "")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 
 if not SECRET_KEY:
     if DEBUG:
         SECRET_KEY = "dev-only-insecure-key-change-me"
     else:
-        raise ValueError("DJANGO_SECRET_KEY is required when DJANGO_DEBUG is false.")
+        raise ValueError("SECRET_KEY is required when DJANGO_DEBUG is false.")
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
 
@@ -48,6 +50,7 @@ INSTALLED_APPS = [
     "booking.apps.BookingConfig",
     "voice.apps.VoiceConfig",
     "ai.apps.AiConfig",
+    "doctors.apps.DoctorsConfig",
 ]
 
 MIDDLEWARE = [

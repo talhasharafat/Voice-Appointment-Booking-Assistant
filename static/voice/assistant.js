@@ -20,6 +20,42 @@
     statusEl.textContent = message;
   }
 
+  function renderRichText(container, text) {
+    const lines = String(text || "").split("\n");
+    const listItems = [];
+
+    function flushList() {
+      if (!listItems.length) {
+        return;
+      }
+      const ol = document.createElement("ol");
+      listItems.forEach(function (entry) {
+        const li = document.createElement("li");
+        li.textContent = entry;
+        ol.appendChild(li);
+      });
+      container.appendChild(ol);
+      listItems.length = 0;
+    }
+
+    lines.forEach(function (line) {
+      const match = line.match(/^\s*(\d+)\.\s+(.*)$/);
+      if (match) {
+        listItems.push(match[2]);
+        return;
+      }
+      flushList();
+      if (!line.trim()) {
+        container.appendChild(document.createElement("br"));
+        return;
+      }
+      const row = document.createElement("div");
+      row.textContent = line;
+      container.appendChild(row);
+    });
+    flushList();
+  }
+
   function appendMessage(role, text) {
     const item = document.createElement("li");
     item.className = role;
@@ -27,10 +63,15 @@
     who.className = "who";
     who.textContent = role === "assistant" ? "Clinic desk" : "You";
     const body = document.createElement("div");
-    body.textContent = text;
+    body.className = "body";
+    if (role === "assistant") {
+      renderRichText(body, text);
+    } else {
+      body.textContent = text;
+    }
     item.appendChild(who);
     item.appendChild(body);
-    transcriptEl.appendChild(item);
+    transcriptEl.prepend(item);
     item.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 

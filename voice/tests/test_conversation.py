@@ -120,9 +120,11 @@ class ConversationTests(TestCase):
         self._turn(session_id, "fever and fatigue")
         alt = self._turn(session_id, "Monday at 10 AM")
         self.assertEqual(alt["state"], "OFFER_ALTERNATIVES")
-        self.assertIn("option 1", alt["message"].lower())
+        self.assertIn("1.", alt["message"])
+        self.assertIn("at", alt["message"].lower())
+        self.assertNotIn("T09:", alt["message"])
 
-        confirm = self._turn(session_id, "option 1")
+        confirm = self._turn(session_id, "1")
         self.assertEqual(confirm["state"], "CONFIRM")
         done = self._turn(session_id, "yes")
         self.assertEqual(done["state"], "COMPLETED")

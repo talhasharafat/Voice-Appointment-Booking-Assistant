@@ -1,0 +1,77 @@
+{% extends "doctors/base.html" %}
+{% block title %}{{ doctor.name }} · Clinic{% endblock %}
+{% block content %}
+<p class="back"><a href="{% url 'doctors:list' %}">← All doctors</a></p>
+
+<section class="hero">
+  <p class="eyebrow">{{ doctor.specialty.name }} · {{ clinic_timezone }}</p>
+  <h1>{{ doctor.name }}</h1>
+  <p class="lede">{{ doctor.specialty.description }}</p>
+</section>
+
+<section class="grid">
+  <article class="panel">
+    <h2>Working hours</h2>
+    <ul class="plain-list">
+      {% for block in working_hours %}
+      <li>{{ block.get_weekday_display }} · {{ block.start_time|time:"g:i A" }} – {{ block.end_time|time:"g:i A" }}</li>
+      {% empty %}
+      <li>No working hours configured.</li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="panel">
+    <h2>Unavailable periods</h2>
+    <ul class="plain-list">
+      {% for item in unavailabilities %}
+      <li>{{ item.starts_at|date:"D, j M Y, g:i A" }} – {{ item.ends_at|date:"g:i A" }}{% if item.reason %} ({{ item.reason }}){% endif %}</li>
+      {% empty %}
+      <li>No upcoming blocked periods.</li>
+      {% endfor %}
+    </ul>
+  </article>
+</section>
+
+<section class="panel wide">
+  <h2>Available bookings</h2>
+  <p class="muted">Open {{ duration_minutes }}-minute slots from {{ range_label }}.</p>
+  {% if available_slots %}
+  <ol class="slot-list">
+    {% for slot in available_slots %}
+    <li>{{ slot.label }}</li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No open slots in the next 7 days.</p>
+  {% endif %}
+</section>
+
+<section class="panel wide">
+  <h2>Upcoming confirmed appointments</h2>
+  {% if upcoming_appointments %}
+  <table class="doctors-table compact">
+    <thead>
+      <tr>
+        <th>When</th>
+        <th>Patient</th>
+        <th>Reference</th>
+        <th>Reason</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for appt in upcoming_appointments %}
+      <tr>
+        <td>{{ appt.starts_at|date:"D, j M Y, g:i A" }}</td>
+        <td>{{ appt.patient.name }}</td>
+        <td>{{ appt.booking_reference }}</td>
+        <td>{{ appt.reason }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No upcoming confirmed appointments.</p>
+  {% endif %}
+</section>
+{% endblock %}

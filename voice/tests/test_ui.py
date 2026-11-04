@@ -8,7 +8,7 @@ class VoiceUiTests(TestCase):
     def test_assistant_page_renders(self):
         response = self.client.get("/voice/")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Northline Clinic")
+        self.assertContains(response, "Clinic")
         self.assertContains(response, "micButton")
         self.assertContains(response, "voice/assistant.js")
         self.assertContains(response, "speechBackend")

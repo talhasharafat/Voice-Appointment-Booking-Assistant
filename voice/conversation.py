@@ -12,6 +12,7 @@ from django.db import transaction
 
 from voice import parsing
 from voice.failures import ConversationFault, expire_if_stale, honest_backend_failure
+from voice.formatting import doctors_list_message, format_slot_label, slots_list_message
 from voice.models import VoiceSession
 from voice.tools import run_tool
 
@@ -283,11 +284,7 @@ def _after_specialty_selected(session, specialty_id, specialty_name):
         )
     session.state = "ASK_DOCTOR"
     session.data = dict(session.data)
-    listing = "; ".join("{} ({})".format(item["name"], index + 1) for index, item in enumerate(doctors))
-    return (
-        "For {}, available doctors are: {}. Which doctor do you want?".format(specialty_name, listing),
-        "doctor_choice",
-    )
+    return doctors_list_message(specialty_name, doctors), "doctor_choice"
 
 
 def _handle_doctor_choice(session, text):
@@ -309,8 +306,10 @@ def _handle_doctor_choice(session, text):
             session.state = "ASK_DATETIME"
             session.data = dict(session.data)
             return "What day and time do you prefer with {}?".format(doctor["name"]), "datetime"
-    listing = "; ".join(item["name"] for item in doctors)
-    return "Please choose one of these doctors: {}.".format(listing), "doctor_choice"
+    return (
+        doctors_list_message(session.data.get("specialty_name") or "this specialty", doctors),
+        "doctor_choice",
+    )
 
 
 def _handle_datetime(session, text):
@@ -392,12 +391,11 @@ def _offer_or_confirm_slot(session, starts_at_iso):
     session.data["offered_slots"] = alternatives[:5]
     session.state = "OFFER_ALTERNATIVES"
     session.data = dict(session.data)
-    spoken = []
-    for index, slot in enumerate(session.data["offered_slots"], start=1):
-        spoken.append("option {}: {}".format(index, slot["starts_at"]))
     return (
-        "That slot is not available. Available options are: {}. "
-        "Please choose an option number.".format("; ".join(spoken)),
+        slots_list_message(
+            session.data["offered_slots"],
+            intro="That time is not available. Here are other open times:",
+        ),
         "slot_choice",
     )
 
@@ -419,14 +417,19 @@ def _handle_alternative_choice(session, text):
 
 def _readback(session):
     return (
-        "Please confirm this booking: patient {name}, phone {phone}, reason {reason}, "
-        "doctor {doctor}, time {starts}. Say yes to book, or no to cancel."
+        "Please confirm this booking:\n\n"
+        "• Patient: {name}\n"
+        "• Phone: {phone}\n"
+        "• Reason: {reason}\n"
+        "• Doctor: {doctor}\n"
+        "• Time: {starts}\n\n"
+        "Say yes to book, or no to cancel."
     ).format(
         name=session.data.get("patient_name"),
         phone=session.data.get("contact_number"),
         reason=session.data.get("reason"),
         doctor=session.data.get("doctor_name"),
-        starts=session.data.get("starts_at"),
+        starts=format_slot_label(session.data.get("starts_at")),
     )
 
 
@@ -526,13 +529,14 @@ def _recover_from_taken_slot(session, alternatives):
         session.data["offered_slots"] = alternatives[:5]
         session.state = "OFFER_ALTERNATIVES"
         session.data = dict(session.data)
-        spoken = [
-            "option {}: {}".format(index, slot["starts_at"])
-            for index, slot in enumerate(session.data["offered_slots"], start=1)
-        ]
         return (
-            "That slot was taken during our conversation. No appointment was booked yet. "
-            "New options are: {}. Choose an option number.".format("; ".join(spoken)),
+            slots_list_message(
+                session.data["offered_slots"],
+                intro=(
+                    "That time was taken during our conversation. "
+                    "No appointment was booked yet. Here are other open times:"
+                ),
+            ),
             "slot_choice",
         )
     session.state = "ASK_DATETIME"

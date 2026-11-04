@@ -52,7 +52,7 @@ Copy `.env.example` to `.env`. Secrets stay out of git (`.env` is gitignored).
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DJANGO_SECRET_KEY` | dev fallback when `DEBUG=true` | Django secret |
+| `SECRET_KEY` | required in production | Django signing secret (cookies/sessions/CSRF). `DJANGO_SECRET_KEY` still accepted as an alias. |
 | `DJANGO_DEBUG` | `true` | Debug mode |
 | `DJANGO_ALLOWED_HOSTS` | `127.0.0.1,localhost` | Allowed hosts |
 | `CLINIC_TIMEZONE` | `Asia/Karachi` | **One** clinic timezone for all slots |
@@ -145,6 +145,8 @@ Clinic timezone: **Asia/Karachi**. Slot length: **30 minutes**.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/` or `/voice/` | Free browser voice UI |
+| GET | `/doctors/` | Doctors directory table |
+| GET | `/doctors/<id>/` | Doctor detail + available booking slots |
 | POST | `/voice/api/session/start/` | Start conversation |
 | POST | `/voice/api/session/turn/` | Send user text |
 | POST | `/voice/api/session/abandon/` | End without booking |
