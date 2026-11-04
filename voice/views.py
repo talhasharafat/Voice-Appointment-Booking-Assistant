@@ -123,5 +123,6 @@ def assistant(request):
         {
             "clinic_timezone": settings.CLINIC_TIMEZONE,
             "speech_backend": getattr(settings, "SPEECH_BACKEND", "browser"),
+            "continuous_mic": getattr(settings, "VOICE_CONTINUOUS_MIC", True),
         },
     )

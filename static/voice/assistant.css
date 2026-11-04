@@ -176,10 +176,27 @@ body {
   margin-top: 1.4rem;
 }
 
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.3rem;
+  margin: 1rem auto 0;
+  text-align: left;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.setting-row input {
+  margin-top: 0.2rem;
+}
+
 .ghost,
 .text-row button {
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 0.5rem;
   background: rgba(255, 255, 255, 0.7);
   color: var(--ink);
   font: inherit;
@@ -215,7 +232,7 @@ body {
 .text-row input {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 0.9rem;
+  border-radius: 0.5rem;
   padding: 0.85rem 1rem;
   font: inherit;
   background: rgba(255, 255, 255, 0.9);

@@ -14,7 +14,7 @@
     <h2>Working hours</h2>
     <ul class="plain-list">
       {% for block in working_hours %}
-      <li>{{ block.get_weekday_display }} · {{ block.start_time|time:"g:i A" }} – {{ block.end_time|time:"g:i A" }}</li>
+      <li>{{ block.get_weekday_display }} · {{ block.start_time|time:"h:i A" }} – {{ block.end_time|time:"h:i A" }}</li>
       {% empty %}
       <li>No working hours configured.</li>
       {% endfor %}
@@ -22,56 +22,48 @@
   </article>
 
   <article class="panel">
-    <h2>Unavailable periods</h2>
-    <ul class="plain-list">
-      {% for item in unavailabilities %}
-      <li>{{ item.starts_at|date:"D, j M Y, g:i A" }} – {{ item.ends_at|date:"g:i A" }}{% if item.reason %} ({{ item.reason }}){% endif %}</li>
-      {% empty %}
-      <li>No upcoming blocked periods.</li>
-      {% endfor %}
+    <h2>Legend</h2>
+    <ul class="plain-list legend">
+      <li><span class="chip chip-appointment"></span> Confirmed appointment</li>
+      <li><span class="chip chip-unavailable"></span> Unavailable period</li>
+      <li>Slot length: {{ duration_minutes }} minutes</li>
     </ul>
   </article>
 </section>
 
 <section class="panel wide">
-  <h2>Available bookings</h2>
-  <p class="muted">Open {{ duration_minutes }}-minute slots from {{ range_label }}.</p>
-  {% if available_slots %}
-  <ol class="slot-list">
-    {% for slot in available_slots %}
-    <li>{{ slot.label }}</li>
-    {% endfor %}
-  </ol>
-  {% else %}
-  <p>No open slots in the next 7 days.</p>
-  {% endif %}
-</section>
+  <div class="calendar-head">
+    <h2>Schedule calendar</h2>
+    <div class="calendar-nav">
+      <a class="text-link" href="?year={{ prev_year }}&month={{ prev_month }}">← Prev</a>
+      <strong>{{ month_label }}</strong>
+      <a class="text-link" href="?year={{ next_year }}&month={{ next_month }}">Next →</a>
+    </div>
+  </div>
+  <p class="muted">Upcoming appointments and unavailable periods are shown on each day. Times use {{ clinic_timezone }}.</p>
 
-<section class="panel wide">
-  <h2>Upcoming confirmed appointments</h2>
-  {% if upcoming_appointments %}
-  <table class="doctors-table compact">
-    <thead>
-      <tr>
-        <th>When</th>
-        <th>Patient</th>
-        <th>Reference</th>
-        <th>Reason</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for appt in upcoming_appointments %}
-      <tr>
-        <td>{{ appt.starts_at|date:"D, j M Y, g:i A" }}</td>
-        <td>{{ appt.patient.name }}</td>
-        <td>{{ appt.booking_reference }}</td>
-        <td>{{ appt.reason }}</td>
-      </tr>
+  <div class="calendar" role="grid" aria-label="Doctor schedule calendar">
+    <div class="calendar-row calendar-row--head">
+      {% for label in weekday_headers %}
+      <div class="calendar-cell head">{{ label }}</div>
       {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <p class="muted">No upcoming confirmed appointments.</p>
-  {% endif %}
+    </div>
+    {% for week in calendar_weeks %}
+    <div class="calendar-row">
+      {% for day in week %}
+      <div class="calendar-cell {% if not day.in_month %}is-outside{% endif %} {% if day.is_today %}is-today{% endif %}">
+        <div class="day-number">{{ day.date.day }}</div>
+        {% if day.events %}
+        <ul class="day-events">
+          {% for event in day.events %}
+          <li class="event event-{{ event.kind }}">{{ event.label }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
 </section>
 {% endblock %}

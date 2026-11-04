@@ -9,12 +9,37 @@
   const bookingRefEl = document.getElementById("bookingRef");
   const textForm = document.getElementById("textForm");
   const textInput = document.getElementById("textInput");
+  const continuousMicInput = document.getElementById("continuousMic");
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let sessionId = null;
   let busy = false;
   let recognition = null;
   let listening = false;
+  let wantListening = false;
+  let speaking = false;
+  let restartTimer = null;
+
+  const STORAGE_KEY = "voiceContinuousMic";
+
+  function continuousEnabled() {
+    if (continuousMicInput) {
+      return !!continuousMicInput.checked;
+    }
+    return !!config.continuousMic;
+  }
+
+  function loadContinuousPreference() {
+    if (!continuousMicInput) {
+      return;
+    }
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (saved === "true" || saved === "false") {
+      continuousMicInput.checked = saved === "true";
+    } else {
+      continuousMicInput.checked = !!config.continuousMic;
+    }
+  }
 
   function setStatus(message) {
     statusEl.textContent = message;
@@ -77,20 +102,35 @@
 
   function speak(text) {
     if (!window.speechSynthesis || !text) {
-      return;
+      scheduleListenRestart(250);
+      return Promise.resolve();
     }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(function (voice) {
-      return /en-(GB|US|IN|PK)/i.test(voice.lang);
+    return new Promise(function (resolve) {
+      window.speechSynthesis.cancel();
+      speaking = true;
+      pauseListeningForSpeech();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(function (voice) {
+        return /en-(GB|US|IN|PK)/i.test(voice.lang);
+      });
+      if (preferred) {
+        utterance.voice = preferred;
+      }
+      utterance.onend = function () {
+        speaking = false;
+        resolve();
+        scheduleListenRestart(350);
+      };
+      utterance.onerror = function () {
+        speaking = false;
+        resolve();
+        scheduleListenRestart(350);
+      };
+      window.speechSynthesis.speak(utterance);
     });
-    if (preferred) {
-      utterance.voice = preferred;
-    }
-    window.speechSynthesis.speak(utterance);
   }
 
   async function postJson(url, payload) {
@@ -149,21 +189,26 @@
           ? "Session ended without a booking."
           : data.status === "failed"
             ? "Booking failed. Nothing was saved."
-            : "Listening for your next reply."
+            : continuousEnabled()
+              ? "Listening continuously…"
+              : "Listening for your next reply."
     );
     speak(data.message);
 
-    // Only show a reference when the backend confirms a completed booking.
     if (data.booked && data.data && data.data.booking_reference) {
       bookingRefEl.hidden = false;
       bookingRefEl.textContent = "Booking reference: " + data.data.booking_reference;
     }
 
     if (data.status !== "active") {
+      wantListening = false;
+      stopRecognition(true);
       sessionId = data.booked ? data.session_id : null;
       micHint.textContent = data.booked ? "Booking finished" : "Start a new booking";
       startButton.disabled = false;
       endButton.disabled = true;
+    } else if (continuousEnabled()) {
+      wantListening = true;
     }
   }
 
@@ -180,6 +225,10 @@
       window.speechSynthesis && window.speechSynthesis.cancel();
       const data = await postJson(config.startUrl, {});
       applyAssistantPayload(data);
+      if (data && data.status === "active" && continuousEnabled()) {
+        wantListening = true;
+        startListening();
+      }
     } catch (error) {
       setStatus(error.message || "Could not start session.");
     } finally {
@@ -199,6 +248,7 @@
       return;
     }
     busy = true;
+    pauseListeningForSpeech();
     appendMessage("user", cleaned);
     setStatus("Checking with the clinic calendar…");
     try {
@@ -211,7 +261,7 @@
       const message = error.message || "I could not process that reply.";
       appendMessage("assistant", message);
       setStatus(message);
-      speak(message);
+      await speak(message);
     } finally {
       busy = false;
       textInput.value = "";
@@ -223,6 +273,8 @@
       return;
     }
     busy = true;
+    wantListening = false;
+    stopRecognition(true);
     try {
       const data = await postJson(config.abandonUrl, { session_id: sessionId });
       applyAssistantPayload(data);
@@ -241,7 +293,55 @@
     listening = active;
     micButton.classList.toggle("is-listening", active);
     micButton.setAttribute("aria-pressed", active ? "true" : "false");
-    micHint.textContent = active ? "Listening… tap again to stop" : "Tap to speak";
+    if (active) {
+      micHint.textContent = continuousEnabled()
+        ? "Listening continuously… tap mic to pause"
+        : "Listening… tap again to stop";
+    } else if (wantListening && continuousEnabled()) {
+      micHint.textContent = "Microphone paused briefly…";
+    } else {
+      micHint.textContent = "Tap to speak";
+    }
+  }
+
+  function stopRecognition(clearWant) {
+    if (clearWant) {
+      wantListening = false;
+    }
+    if (restartTimer) {
+      window.clearTimeout(restartTimer);
+      restartTimer = null;
+    }
+    if (recognition && listening) {
+      try {
+        recognition.stop();
+      } catch (error) {
+        // ignore
+      }
+    }
+    setListening(false);
+  }
+
+  function pauseListeningForSpeech() {
+    if (recognition && listening) {
+      try {
+        recognition.stop();
+      } catch (error) {
+        // ignore
+      }
+    }
+  }
+
+  function scheduleListenRestart(delayMs) {
+    if (restartTimer) {
+      window.clearTimeout(restartTimer);
+    }
+    restartTimer = window.setTimeout(function () {
+      restartTimer = null;
+      if (wantListening && continuousEnabled() && sessionId && !busy && !speaking) {
+        startListening();
+      }
+    }, delayMs || 300);
   }
 
   function ensureRecognition() {
@@ -259,28 +359,68 @@
 
     recognition.onstart = function () {
       setListening(true);
-      setStatus("Listening…");
+      if (!busy && !speaking) {
+        setStatus(continuousEnabled() ? "Listening continuously…" : "Listening…");
+      }
     };
     recognition.onerror = function (event) {
       setListening(false);
       if (event.error === "not-allowed") {
+        wantListening = false;
         setStatus("Microphone permission blocked. Use the text box instead.");
-      } else if (event.error !== "aborted") {
-        setStatus("I could not hear clearly. Try again or type your reply.");
+        return;
+      }
+      if (event.error === "aborted") {
+        return;
+      }
+      if (event.error === "no-speech" && wantListening && continuousEnabled()) {
+        scheduleListenRestart(400);
+        return;
+      }
+      setStatus("I could not hear clearly. Try again or type your reply.");
+      if (wantListening && continuousEnabled()) {
+        scheduleListenRestart(800);
       }
     };
     recognition.onend = function () {
       setListening(false);
+      if (wantListening && continuousEnabled() && sessionId && !busy && !speaking) {
+        scheduleListenRestart(350);
+      }
     };
     recognition.onresult = function (event) {
       const transcript = event.results[0] && event.results[0][0] && event.results[0][0].transcript;
       if (transcript) {
         sendTurn(transcript);
+      } else if (wantListening && continuousEnabled()) {
+        scheduleListenRestart(400);
       } else {
         setStatus("I did not catch that. Please try again.");
       }
     };
     return recognition;
+  }
+
+  function startListening() {
+    if (!SpeechRecognition) {
+      setStatus("This browser has no free Web Speech mic support. Type your reply below. Chrome works best.");
+      textInput.focus();
+      return;
+    }
+    if (busy || speaking) {
+      scheduleListenRestart(400);
+      return;
+    }
+    const engine = ensureRecognition();
+    if (!engine || listening) {
+      return;
+    }
+    window.speechSynthesis && window.speechSynthesis.cancel();
+    try {
+      engine.start();
+    } catch (error) {
+      scheduleListenRestart(600);
+    }
   }
 
   function toggleMic() {
@@ -292,32 +432,19 @@
       textInput.focus();
       return;
     }
-    const engine = ensureRecognition();
-    if (!engine) {
-      return;
-    }
-    if (listening) {
-      engine.stop();
+    if (listening || wantListening) {
+      wantListening = false;
+      stopRecognition(true);
+      setStatus("Microphone paused.");
+      micHint.textContent = "Tap to speak";
       return;
     }
     if (!sessionId) {
-      startSession().then(function () {
-        if (sessionId) {
-          try {
-            engine.start();
-          } catch (error) {
-            setStatus("Could not start the microphone.");
-          }
-        }
-      });
+      startSession();
       return;
     }
-    window.speechSynthesis && window.speechSynthesis.cancel();
-    try {
-      engine.start();
-    } catch (error) {
-      setStatus("Could not start the microphone.");
-    }
+    wantListening = continuousEnabled();
+    startListening();
   }
 
   micButton.addEventListener("click", toggleMic);
@@ -327,15 +454,31 @@
     event.preventDefault();
     sendTurn(textInput.value);
   });
+  if (continuousMicInput) {
+    loadContinuousPreference();
+    continuousMicInput.addEventListener("change", function () {
+      window.localStorage.setItem(STORAGE_KEY, continuousMicInput.checked ? "true" : "false");
+      if (continuousMicInput.checked && sessionId && !busy) {
+        wantListening = true;
+        startListening();
+      } else if (!continuousMicInput.checked) {
+        wantListening = false;
+        stopRecognition(true);
+      }
+    });
+  }
 
   if (!SpeechRecognition) {
     setStatus("Mic speech recognition is unavailable here. You can still book by typing.");
     micHint.textContent = "Typing mode";
   } else {
-    setStatus("Free Browser Speech");
+    setStatus(
+      continuousEnabled()
+        ? "Ready · continuous mic can stay on after Start booking"
+        : "Ready · tap mic for each reply"
+    );
   }
 
-  // Chrome loads voices asynchronously.
   if (window.speechSynthesis) {
     window.speechSynthesis.getVoices();
     window.speechSynthesis.onvoiceschanged = function () {

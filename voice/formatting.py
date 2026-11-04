@@ -12,7 +12,7 @@ def format_slot_label(value):
     """
     Turn an ISO datetime into a patient-readable label.
 
-    Example: Tuesday, 10 November 2026 at 9:00 AM
+    Example: Tuesday, 10 November 2026 at 09:00 AM
     """
     if value is None:
         return ""
@@ -26,7 +26,7 @@ def format_slot_label(value):
 
     hour_12 = moment.hour % 12 or 12
     meridiem = "AM" if moment.hour < 12 else "PM"
-    return "{weekday}, {day} {month} {year} at {hour}:{minute:02d} {meridiem}".format(
+    return "{weekday}, {day} {month} {year} at {hour:02d}:{minute:02d} {meridiem}".format(
         weekday=moment.strftime("%A"),
         day=moment.day,
         month=moment.strftime("%B"),
@@ -35,6 +35,22 @@ def format_slot_label(value):
         minute=moment.minute,
         meridiem=meridiem,
     )
+
+
+def format_clock(value):
+    """Format a time or datetime as 01:00 AM style."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        moment = as_clinic_time(value)
+        hour = moment.hour
+        minute = moment.minute
+    else:
+        hour = value.hour
+        minute = value.minute
+    hour_12 = hour % 12 or 12
+    meridiem = "AM" if hour < 12 else "PM"
+    return "{:02d}:{:02d} {}".format(hour_12, minute, meridiem)
 
 
 def numbered_list(items, *, intro, outro=None):

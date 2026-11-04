@@ -122,3 +122,5 @@ AI_PROVIDER = os.getenv("AI_PROVIDER", "local")
 SPEECH_BACKEND = os.getenv("SPEECH_BACKEND", "browser")
 # Idle voice chats auto-close without creating appointments.
 VOICE_SESSION_TIMEOUT_MINUTES = int(os.getenv("VOICE_SESSION_TIMEOUT_MINUTES", "30"))
+# Keep the browser mic listening after Start booking (Web Speech continuous mode).
+VOICE_CONTINUOUS_MIC = env_bool("VOICE_CONTINUOUS_MIC", True)

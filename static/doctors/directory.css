@@ -130,7 +130,7 @@ body {
 .muted { color: var(--ink-soft); }
 .plain-list, .slot-list {
   margin: 0;
-  padding-left: 1.2rem;
+  padding-left: 2rem;
   line-height: 1.6;
 }
 .slot-list {
@@ -139,8 +139,102 @@ body {
   max-height: 28rem;
   overflow: auto;
 }
+.legend { list-style: none; padding-left: 0; }
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.4rem 0;
+}
+.chip {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 0.25rem;
+  display: inline-block;
+}
+.chip-appointment { background: #0f6b5c; }
+.chip-unavailable { background: #8a4b1f; }
+
+.calendar-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.35rem;
+}
+.calendar-head h2 { margin: 0; }
+.calendar-nav {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+}
+.calendar {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  overflow: hidden;
+  background: rgba(255,255,255,0.55);
+}
+.calendar-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.calendar-cell {
+  min-height: 7.5rem;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0.45rem;
+}
+.calendar-row .calendar-cell:last-child { border-right: 0; }
+.calendar-row--head .calendar-cell {
+  min-height: auto;
+  background: rgba(15, 107, 92, 0.08);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+.calendar-cell.is-outside {
+  background: rgba(20, 49, 44, 0.04);
+  color: rgba(20, 49, 44, 0.45);
+}
+.calendar-cell.is-today {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.day-number {
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+.day-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.event {
+  font-size: 0.72rem;
+  line-height: 1.25;
+  border-radius: 0.35rem;
+  padding: 0.25rem 0.35rem;
+}
+.event-appointment {
+  background: rgba(15, 107, 92, 0.14);
+  color: var(--accent-deep);
+}
+.event-unavailable {
+  background: rgba(138, 75, 31, 0.14);
+  color: #6d3a16;
+}
+
 @media (max-width: 760px) {
   .grid { grid-template-columns: 1fr; }
   .doctors-table th:nth-child(3),
   .doctors-table td:nth-child(3) { display: none; }
+  .calendar-cell { min-height: 5.5rem; }
+  .event { font-size: 0.65rem; }
+  .topbar { flex-direction: column; gap: 0.5rem; }
 }

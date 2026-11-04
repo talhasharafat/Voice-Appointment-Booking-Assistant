@@ -60,6 +60,7 @@ Copy `.env.example` to `.env`. Secrets stay out of git (`.env` is gitignored).
 | `AI_PROVIDER` | `local` | Free local adapter (`fake` for tests) |
 | `SPEECH_BACKEND` | `browser` | Client Web Speech only |
 | `VOICE_SESSION_TIMEOUT_MINUTES` | `30` | Idle chats auto-close with no booking |
+| `VOICE_CONTINUOUS_MIC` | `true` | Keep browser mic listening after Start booking |
 | `DJANGO_DB_ENGINE` / `DJANGO_DB_NAME` | SQLite file | Optional DB override |
 
 No paid API keys are required or used.

@@ -42,6 +42,11 @@
         <button id="endButton" class="ghost" type="button" disabled>End without booking</button>
       </div>
 
+      <label class="setting-row" for="continuousMic">
+        <input id="continuousMic" type="checkbox" {% if continuous_mic %}checked{% endif %}>
+        <span>Keep microphone on while booking (no need to tap mic each turn)</span>
+      </label>
+
       <form id="textForm" class="text-fallback" autocomplete="off">
         <label for="textInput">Or type your reply</label>
         <div class="text-row">
@@ -64,7 +69,8 @@
       turnUrl: "{% url 'voice:turn' %}",
       abandonUrl: "{% url 'voice:abandon' %}",
       clinicTimezone: "{{ clinic_timezone }}",
-      speechBackend: "{{ speech_backend }}"
+      speechBackend: "{{ speech_backend }}",
+      continuousMic: {% if continuous_mic %}true{% else %}false{% endif %}
     };
   </script>
   <script src="{% static 'voice/assistant.js' %}"></script>
