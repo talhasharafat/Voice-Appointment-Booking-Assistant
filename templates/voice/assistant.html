@@ -1,0 +1,68 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Northline Clinic — Voice Booking</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'voice/assistant.css' %}">
+</head>
+<body>
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <main class="stage">
+    <header class="brand-block">
+      <p class="eyebrow">Asia/Karachi · 30-minute visits</p>
+      <h1 class="brand">Clinic Appointment</h1>
+      <p class="lede">Book by voice. Speak clearly after you tap the microphone. This desk schedules only — it does not diagnose or prescribe.</p>
+    </header>
+
+    <section class="console" aria-label="Voice booking console">
+      <p id="status" class="status" role="status">Ready when you are.</p>
+
+      <button id="micButton" class="mic" type="button" aria-pressed="false" aria-label="Start listening">
+        <span class="mic__ring" aria-hidden="true"></span>
+        <span class="mic__core" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true">
+            <path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+          </svg>
+        </span>
+      </button>
+      <p class="mic-hint" id="micHint">Tap to speak</p>
+
+      <div class="actions">
+        <button id="startButton" class="ghost" type="button">Start booking</button>
+        <button id="endButton" class="ghost" type="button" disabled>End without booking</button>
+      </div>
+
+      <form id="textForm" class="text-fallback" autocomplete="off">
+        <label for="textInput">Or type your reply</label>
+        <div class="text-row">
+          <input id="textInput" name="text" type="text" placeholder="Type if the mic is unavailable" maxlength="300">
+          <button type="submit">Send</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="transcript-wrap" aria-label="Conversation">
+      <h2>Conversation</h2>
+      <ol id="transcript" class="transcript"></ol>
+      <p id="bookingRef" class="booking-ref" hidden></p>
+    </section>
+  </main>
+
+  <script>
+    window.VOICE_CONFIG = {
+      startUrl: "{% url 'voice:start' %}",
+      turnUrl: "{% url 'voice:turn' %}",
+      abandonUrl: "{% url 'voice:abandon' %}",
+      clinicTimezone: "{{ clinic_timezone }}",
+      speechBackend: "{{ speech_backend }}"
+    };
+  </script>
+  <script src="{% static 'voice/assistant.js' %}"></script>
+</body>
+</html>
