@@ -21,13 +21,13 @@
     <header class="brand-block">
       <p class="eyebrow">Asia/Karachi · 30-minute visits</p>
       <h1 class="brand">Clinic Appointment</h1>
-      <p class="lede">Book by voice. Speak clearly after you tap the microphone. This desk schedules only — it does not diagnose or prescribe.</p>
+      <p class="lede">Book by voice over LiveKit. Tap the microphone to connect. This desk schedules only — it does not diagnose or prescribe.</p>
     </header>
 
     <section class="console" aria-label="Voice booking console">
       <p id="status" class="status" role="status">Ready when you are.</p>
 
-      <button id="micButton" class="mic" type="button" aria-pressed="false" aria-label="Start listening">
+      <button id="micButton" class="mic" type="button" aria-pressed="false" aria-label="Connect microphone">
         <span class="mic__ring" aria-hidden="true"></span>
         <span class="mic__core" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true">
@@ -35,25 +35,12 @@
           </svg>
         </span>
       </button>
-      <p class="mic-hint" id="micHint">Tap to speak</p>
+      <p class="mic-hint" id="micHint">Tap to connect and speak</p>
 
       <div class="actions">
         <button id="startButton" class="ghost" type="button">Start booking</button>
         <button id="endButton" class="ghost" type="button" disabled>End without booking</button>
       </div>
-
-      <label class="setting-row" for="continuousMic">
-        <input id="continuousMic" type="checkbox" {% if continuous_mic %}checked{% endif %}>
-        <span>Keep microphone on while booking (no need to tap mic each turn)</span>
-      </label>
-
-      <form id="textForm" class="text-fallback" autocomplete="off">
-        <label for="textInput">Or type your reply</label>
-        <div class="text-row">
-          <input id="textInput" name="text" type="text" placeholder="Type if the mic is unavailable" maxlength="300">
-          <button type="submit">Send</button>
-        </div>
-      </form>
     </section>
 
     <section class="transcript-wrap" aria-label="Conversation">
@@ -63,16 +50,16 @@
     </section>
   </main>
 
+  <div id="remoteAudio" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.9.1/dist/livekit-client.umd.min.js"></script>
   <script>
     window.VOICE_CONFIG = {
-      startUrl: "{% url 'voice:start' %}",
-      turnUrl: "{% url 'voice:turn' %}",
-      abandonUrl: "{% url 'voice:abandon' %}",
-      clinicTimezone: "{{ clinic_timezone }}",
-      speechBackend: "{{ speech_backend }}",
-      continuousMic: {% if continuous_mic %}true{% else %}false{% endif %}
+      tokenUrl: "{% url 'voice:livekit_token' %}",
+      clinicTimezone: "{{ clinic_timezone|escapejs }}",
+      livekitUrl: "{{ livekit_url|default:'ws://127.0.0.1:7880'|escapejs }}"
     };
   </script>
-  <script src="{% static 'voice/assistant.js' %}"></script>
+  <script src="{% static 'voice/assistant.js' %}?v=6"></script>
 </body>
 </html>

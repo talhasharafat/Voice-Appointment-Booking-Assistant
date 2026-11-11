@@ -1,3 +1,1 @@
-from django.contrib import admin
-
-# Register your models here.
+# Doctors UI app has no models; clinic.Doctor is registered in clinic.admin.

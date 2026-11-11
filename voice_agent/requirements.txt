@@ -1,0 +1,10 @@
+# Separate process from Django. Requires Python >= 3.10.
+# Stack: LiveKit Agents + Groq (STT/LLM) + Fish Audio (TTS)
+livekit-agents[openai,silero,groq]~=1.8
+livekit
+livekit-plugins-groq
+openai
+httpx
+python-dotenv
+numpy
+onnxruntime

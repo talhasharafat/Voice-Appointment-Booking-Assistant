@@ -1,5 +1,5 @@
 """
-Django settings for the voice appointment booking assistant.
+Django settings for the clinic appointment booking project.
 
 Secrets and environment-specific values come from the process environment
 (or a local .env file). Do not commit real credentials.
@@ -26,9 +26,7 @@ def env_list(name: str, default: str = ""):
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-# Django requires SECRET_KEY for signing cookies/sessions/CSRF. Set it via .env.
-# (Older .env files may still use DJANGO_SECRET_KEY — both are accepted.)
-SECRET_KEY = os.getenv("SECRET_KEY") or os.getenv("DJANGO_SECRET_KEY", "")
+SECRET_KEY = os.getenv("SECRET_KEY", "")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 
 if not SECRET_KEY:
@@ -46,11 +44,12 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "rest_framework",
     "clinic.apps.ClinicConfig",
     "booking.apps.BookingConfig",
     "voice.apps.VoiceConfig",
-    "ai.apps.AiConfig",
     "doctors.apps.DoctorsConfig",
+    "api.apps.ApiConfig",
 ]
 
 MIDDLEWARE = [
@@ -85,9 +84,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": os.getenv("DJANGO_DB_ENGINE", "django.db.backends.sqlite3"),
-        "NAME": os.getenv("DJANGO_DB_NAME", str(BASE_DIR / "db.sqlite3")),
-        # Wait out short SQLite write contention from concurrent booking attempts.
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": str(BASE_DIR / "db.sqlite3"),
         "OPTIONS": {"timeout": 30},
     }
 }
@@ -100,8 +98,6 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = "en-us"
-
-# One clinic timezone for all appointment slots. USE_TZ stores datetimes in UTC.
 CLINIC_TIMEZONE = os.getenv("CLINIC_TIMEZONE", "Asia/Karachi")
 TIME_ZONE = CLINIC_TIMEZONE
 USE_I18N = True
@@ -113,14 +109,21 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Scheduling constants used by later tasks. Duration is fixed for every appointment.
 APPOINTMENT_DURATION_MINUTES = int(os.getenv("APPOINTMENT_DURATION_MINUTES", "30"))
-
-# Free adapters only (see ai.providers.registry). No paid API keys.
-AI_PROVIDER = os.getenv("AI_PROVIDER", "local")
-# browser = Web Speech API in the client for STT/TTS.
-SPEECH_BACKEND = os.getenv("SPEECH_BACKEND", "browser")
-# Idle voice chats auto-close without creating appointments.
 VOICE_SESSION_TIMEOUT_MINUTES = int(os.getenv("VOICE_SESSION_TIMEOUT_MINUTES", "30"))
-# Keep the browser mic listening after Start booking (Web Speech continuous mode).
-VOICE_CONTINUOUS_MIC = env_bool("VOICE_CONTINUOUS_MIC", True)
+
+# Local LiveKit server (no cloud). Used by /voice/ to mint room tokens.
+LIVEKIT_URL = os.getenv("LIVEKIT_URL", "ws://127.0.0.1:7880")
+LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "devkey")
+LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secret")
+LIVEKIT_AGENT_NAME = os.getenv("LIVEKIT_AGENT_NAME", "clinic-booking")
+
+REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+    "DEFAULT_PARSER_CLASSES": [
+        "rest_framework.parsers.JSONParser",
+    ],
+    "UNAUTHENTICATED_USER": None,
+}

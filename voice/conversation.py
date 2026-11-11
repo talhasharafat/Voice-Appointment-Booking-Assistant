@@ -130,7 +130,6 @@ def _payload(session, message, expect, ok=True):
         "state": session.state,
         "message": message,
         "expect": expect,
-        "speech_backend": "browser",
         "booked": completed,
         "data": {
             "patient_name": session.data.get("patient_name"),

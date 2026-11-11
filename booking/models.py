@@ -4,6 +4,7 @@ from django.db import models
 
 class Appointment(models.Model):
     class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
         CANCELLED = "cancelled", "Cancelled"
 
@@ -29,6 +30,8 @@ class Appointment(models.Model):
     idempotency_key = models.CharField(
         max_length=64,
         unique=True,
+        null=True,
+        blank=True,
         help_text="Client-supplied key so a retried booking request cannot create a second appointment.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
@@ -41,10 +44,11 @@ class Appointment(models.Model):
                 check=models.Q(ends_at__gt=models.F("starts_at")),
                 name="appointment_end_after_start",
             ),
+            # Active bookings cannot share a doctor + start time.
             models.UniqueConstraint(
                 fields=["doctor", "starts_at"],
-                condition=models.Q(status="confirmed"),
-                name="uniq_confirmed_doctor_slot",
+                condition=models.Q(status__in=["pending", "confirmed"]),
+                name="uniq_active_doctor_slot",
             ),
         ]
 

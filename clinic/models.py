@@ -34,6 +34,8 @@ class Doctor(models.Model):
         related_name="doctors",
     )
     is_active = models.BooleanField(default=True)
+    # Clinic-wide timezone; kept on the doctor for clarity in APIs/admin.
+    timezone = models.CharField(max_length=64, default="Asia/Karachi")
 
     class Meta:
         ordering = ["name"]
@@ -80,6 +82,9 @@ class WorkingHours(models.Model):
 
 
 class Unavailability(models.Model):
+    """Blocked time for a doctor outside normal bookings."""
+
+
     doctor = models.ForeignKey(
         Doctor,
         on_delete=models.CASCADE,
@@ -91,7 +96,8 @@ class Unavailability(models.Model):
 
     class Meta:
         ordering = ["starts_at"]
-        verbose_name_plural = "unavailabilities"
+        verbose_name = "unavailable period"
+        verbose_name_plural = "unavailable periods"
         constraints = [
             models.CheckConstraint(
                 check=models.Q(ends_at__gt=models.F("starts_at")),
@@ -111,7 +117,8 @@ class Patient(models.Model):
     """Minimum fields required to book: identity and a way to contact the patient."""
 
     name = models.CharField(max_length=150)
-    contact_number = models.CharField(max_length=30)
+    contact_number = models.CharField(max_length=30, help_text="Phone number")
+    email = models.EmailField(blank=True, default="")
 
     class Meta:
         ordering = ["name"]
@@ -122,5 +129,10 @@ class Patient(models.Model):
             ),
         ]
 
+    @property
+    def phone(self):
+        return self.contact_number
+
     def __str__(self):
         return "{} ({})".format(self.name, self.contact_number)
+

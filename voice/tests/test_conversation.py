@@ -1,4 +1,5 @@
 from datetime import datetime, time
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.test import TestCase, override_settings
@@ -11,6 +12,8 @@ from voice.parsing import extract_phone, parse_preferred_datetime
 
 
 TZ = ZoneInfo("Asia/Karachi")
+# Sunday before the Monday slot used below.
+FROZEN_NOW = datetime(2027, 2, 28, 9, 0, tzinfo=TZ)
 
 
 @override_settings(
@@ -40,7 +43,10 @@ class ConversationTests(TestCase):
             end_time=time(12, 0),
         )
         # Extra GP doctor to exercise doctor choice when needed in other cases.
-        self.slot = datetime(2026, 11, 9, 10, 0, tzinfo=TZ)
+        self.slot = datetime(2027, 3, 1, 10, 0, tzinfo=TZ)
+        self._now_patcher = patch("django.utils.timezone.now", return_value=FROZEN_NOW)
+        self._now_patcher.start()
+        self.addCleanup(self._now_patcher.stop)
 
     def _turn(self, session_id, text):
         return process_turn(session_id, text)
@@ -49,7 +55,7 @@ class ConversationTests(TestCase):
         self.assertEqual(extract_phone("0300-1234567"), "03001234567")
         preferred = parse_preferred_datetime(
             "Monday at 10 AM",
-            now=datetime(2026, 11, 8, 9, 0, tzinfo=TZ),
+            now=FROZEN_NOW,
         )
         self.assertEqual(preferred, self.slot)
 

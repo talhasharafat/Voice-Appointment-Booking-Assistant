@@ -93,6 +93,8 @@ def find_doctors(specialty_id=None):
             "name": doctor.name,
             "specialty_id": doctor.specialty_id,
             "specialty_name": doctor.specialty.name,
+            "specialty_description": doctor.specialty.description,
+            "timezone": doctor.timezone,
         }
         for doctor in queryset
     ]
@@ -147,16 +149,21 @@ def check_availability(doctor_id, day=None, date_from=None, date_to=None, prefer
     }
 
 
-def get_or_create_patient(name, contact_number):
+def get_or_create_patient(name, contact_number, email=""):
     name = (name or "").strip()
     contact_number = (contact_number or "").strip()
+    email = (email or "").strip()
     if not name or not contact_number:
         raise InvalidBookingRequest("patient_name and contact_number are required.")
     try:
-        patient, _ = Patient.objects.get_or_create(
+        patient, created = Patient.objects.get_or_create(
             name=name,
             contact_number=contact_number,
+            defaults={"email": email},
         )
+        if not created and email and patient.email != email:
+            patient.email = email
+            patient.save(update_fields=["email"])
         return patient
     except IntegrityError:
         return Patient.objects.get(name=name, contact_number=contact_number)
@@ -179,6 +186,8 @@ def appointment_payload(appointment):
             "id": appointment.patient_id,
             "name": appointment.patient.name,
             "contact_number": appointment.patient.contact_number,
+            "phone": appointment.patient.contact_number,
+            "email": appointment.patient.email,
         },
         "doctor": {
             "id": appointment.doctor_id,
@@ -198,6 +207,7 @@ def create_appointment(
     contact_number,
     reason,
     idempotency_key,
+    email="",
     now=None,
 ):
     """
@@ -216,6 +226,7 @@ def create_appointment(
                 contact_number=contact_number,
                 reason=reason,
                 idempotency_key=idempotency_key,
+                email=email,
                 now=now,
             )
         except OperationalError as exc:
@@ -234,11 +245,12 @@ def _create_appointment_once(
     contact_number,
     reason,
     idempotency_key,
+    email="",
     now=None,
 ):
     if doctor_id is None:
         raise InvalidBookingRequest("doctor_id is required.")
-    key = (idempotency_key or "").strip()
+    key = (idempotency_key or "").strip() or None
     if not key:
         raise InvalidBookingRequest("idempotency_key is required.")
     reason = (reason or "").strip()
@@ -264,12 +276,12 @@ def _create_appointment_once(
     except Doctor.DoesNotExist as exc:
         raise DoctorNotFound("Doctor {} was not found or is inactive.".format(doctor_id)) from exc
 
-    # Hold overlapping confirmed rows so two creates cannot both pass the free check.
+    # Hold overlapping active rows so two creates cannot both pass the free check.
     start = parse_clinic_datetime(starts_at)
     slot = slot_from_start(start)
     Appointment.objects.select_for_update().filter(
         doctor=doctor,
-        status=Appointment.Status.CONFIRMED,
+        status__in=[Appointment.Status.CONFIRMED, Appointment.Status.PENDING],
         starts_at__lt=slot.ends_at,
         ends_at__gt=slot.starts_at,
     ).exists()
@@ -283,7 +295,7 @@ def _create_appointment_once(
             )
         )
 
-    patient = get_or_create_patient(patient_name, contact_number)
+    patient = get_or_create_patient(patient_name, contact_number, email=email)
 
     for _ in range(5):
         reference = _new_booking_reference()
@@ -314,7 +326,7 @@ def _create_appointment_once(
             if Appointment.objects.filter(
                 doctor=doctor,
                 starts_at=slot.starts_at,
-                status=Appointment.Status.CONFIRMED,
+                status__in=[Appointment.Status.CONFIRMED, Appointment.Status.PENDING],
             ).exists():
                 raise SlotUnavailable("That slot was just taken by another booking.")
             # Rare booking_reference collision; retry with a new reference.

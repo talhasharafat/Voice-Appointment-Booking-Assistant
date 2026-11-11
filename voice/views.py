@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET, require_http_methods
 
 from voice import conversation
 from voice.failures import honest_backend_failure
+from voice.livekit_tokens import mint_patient_token
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,26 @@ def _safe_json(handler, request):
         )
 
 
+@require_http_methods(["POST"])
+@csrf_exempt
+def livekit_token(request):
+    """Browser requests a LiveKit room token; the agent worker joins the same room."""
+
+    def _inner(_req):
+        body = _body(request) or {}
+        try:
+            payload = mint_patient_token(room_name=body.get("room"))
+        except RuntimeError as exc:
+            return JsonResponse(
+                {"ok": False, "error": {"code": "livekit_config", "message": str(exc)}},
+                status=503,
+            )
+        return JsonResponse({"ok": True, **payload})
+
+    return _safe_json(_inner, request)
+
+
+# Legacy text-session endpoints kept for unit tests of the rule-based conversation.
 @require_http_methods(["POST"])
 @csrf_exempt
 def start(request):
@@ -105,14 +126,7 @@ def abandon(request):
 
 @require_GET
 def health(request):
-    return JsonResponse(
-        {
-            "ok": True,
-            "speech_backend": "browser",
-            "ai_provider": "local",
-            "message": "Free voice booking conversation API",
-        }
-    )
+    return JsonResponse({"ok": True, "transport": "livekit"})
 
 
 @require_GET
@@ -122,7 +136,6 @@ def assistant(request):
         "voice/assistant.html",
         {
             "clinic_timezone": settings.CLINIC_TIMEZONE,
-            "speech_backend": getattr(settings, "SPEECH_BACKEND", "browser"),
-            "continuous_mic": getattr(settings, "VOICE_CONTINUOUS_MIC", True),
+            "livekit_url": getattr(settings, "LIVEKIT_URL", None) or "ws://127.0.0.1:7880",
         },
     )

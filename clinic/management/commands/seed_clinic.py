@@ -48,17 +48,18 @@ class Command(BaseCommand):
             },
         )
 
+        tz_name = settings.CLINIC_TIMEZONE
         amina, _ = Doctor.objects.update_or_create(
             name="Dr. Amina Khan",
-            defaults={"specialty": gp, "is_active": True},
+            defaults={"specialty": gp, "is_active": True, "timezone": tz_name},
         )
         bilal, _ = Doctor.objects.update_or_create(
             name="Dr. Bilal Hussain",
-            defaults={"specialty": gp, "is_active": True},
+            defaults={"specialty": gp, "is_active": True, "timezone": tz_name},
         )
         sara, _ = Doctor.objects.update_or_create(
             name="Dr. Sara Malik",
-            defaults={"specialty": derm, "is_active": True},
+            defaults={"specialty": derm, "is_active": True, "timezone": tz_name},
         )
 
         self._set_weekday_hours(amina, WEEKDAY_RANGE, time(9, 0), time(17, 0))
@@ -106,10 +107,39 @@ class Command(BaseCommand):
                 },
             )
 
+        # Extra occupied slots across the next seven days so demos see a mix.
+        now = timezone.now().astimezone(tz)
+        extra = (
+            (amina, patients["ahmed"], 0, 11, 0, "SEED-A3", "seed-amina-d0-1100", "Follow-up"),
+            (bilal, patients["fatima"], 1, 14, 0, "SEED-B2", "seed-bilal-d1-1400", "Check-up"),
+            (sara, patients["omar"], 2, 10, 0, "SEED-S2", "seed-sara-d2-1000", "Rash review"),
+            (amina, patients["omar"], 3, 15, 30, "SEED-A4", "seed-amina-d3-1530", "Fatigue"),
+            (bilal, patients["ahmed"], 5, 11, 0, "SEED-B3", "seed-bilal-d5-1100", "Sore throat"),
+        )
+        for doctor, patient, day_offset, hour, minute, reference, key, reason in extra:
+            day = now.date() + timedelta(days=day_offset)
+            if not doctor.working_hours.filter(weekday=day.weekday()).exists():
+                continue
+            starts_at = datetime.combine(day, time(hour, minute), tzinfo=tz)
+            if starts_at <= now:
+                continue
+            Appointment.objects.update_or_create(
+                booking_reference=reference,
+                defaults={
+                    "patient": patient,
+                    "doctor": doctor,
+                    "starts_at": starts_at,
+                    "ends_at": starts_at + duration,
+                    "reason": reason,
+                    "status": Appointment.Status.CONFIRMED,
+                    "idempotency_key": key,
+                },
+            )
+
         self.stdout.write(self.style.SUCCESS("Sample clinic data is ready."))
         self.stdout.write(
-            "Occupied slots: Amina Mon 09:00 and 09:30, Bilal Mon 10:00, Sara Tue 09:00 "
-            "({}). Other in-hours slots stay free.".format(settings.CLINIC_TIMEZONE)
+            "Three doctors across two specialties; occupied + free slots for the next week "
+            "({}).".format(settings.CLINIC_TIMEZONE)
         )
 
     def _set_weekday_hours(self, doctor, weekdays, start_time, end_time):

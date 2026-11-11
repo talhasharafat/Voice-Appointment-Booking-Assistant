@@ -34,7 +34,7 @@ class VoiceToolsTests(TestCase):
             start_time=time(9, 0),
             end_time=time(12, 0),
         )
-        self.slot = datetime(2026, 11, 9, 10, 0, tzinfo=TZ)
+        self.slot = datetime(2027, 3, 1, 10, 0, tzinfo=TZ)
 
     def test_tool_specs_cover_booking_actions(self):
         names = {item["name"] for item in list_tools()}
@@ -69,7 +69,7 @@ class VoiceToolsTests(TestCase):
             "check_availability",
             {
                 "doctor_id": self.amina.id,
-                "date": "2026-11-09",
+                "date": "2027-03-01",
                 "preferred_starts_at": self.slot.isoformat(),
             },
         )

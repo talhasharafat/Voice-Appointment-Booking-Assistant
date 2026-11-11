@@ -10,7 +10,7 @@ from clinic.models import Doctor, Patient, Specialty, Unavailability, Weekday, W
 
 
 TZ = ZoneInfo("Asia/Karachi")
-MONDAY = datetime(2026, 11, 9, tzinfo=TZ).date()  # a Monday
+MONDAY = datetime(2027, 3, 1, tzinfo=TZ).date()  # a Monday
 
 
 @override_settings(
@@ -36,7 +36,7 @@ class CalendarEngineTests(TestCase):
             end_time=time(12, 0),
         )
         self.patient = Patient.objects.create(name="Test Patient", contact_number="03000000000")
-        self.morning = datetime(2026, 11, 9, 8, 0, tzinfo=TZ)
+        self.morning = datetime(2027, 3, 1, 8, 0, tzinfo=TZ)
 
     def _at(self, hour, minute=0):
         return datetime.combine(MONDAY, time(hour, minute), tzinfo=TZ)

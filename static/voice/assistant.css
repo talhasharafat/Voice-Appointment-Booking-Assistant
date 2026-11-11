@@ -176,25 +176,7 @@ body {
   margin-top: 1.4rem;
 }
 
-.setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 0.3rem;
-  margin: 1rem auto 0;
-  text-align: left;
-  color: var(--ink-soft);
-  font-size: 0.92rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.setting-row input {
-  margin-top: 0.2rem;
-}
-
-.ghost,
-.text-row button {
+.ghost {
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   background: rgba(255, 255, 255, 0.7);
@@ -208,35 +190,6 @@ body {
 .ghost:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.text-fallback {
-  margin-top: 1.5rem;
-  text-align: left;
-}
-
-.text-fallback label {
-  display: block;
-  margin-bottom: 0.4rem;
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.text-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.6rem;
-}
-
-.text-row input {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  padding: 0.85rem 1rem;
-  font: inherit;
-  background: rgba(255, 255, 255, 0.9);
-  color: var(--ink);
 }
 
 .transcript-wrap {
@@ -267,7 +220,7 @@ body {
   animation: fade-in 320ms ease both;
 }
 
-.transcript li.assistant {
+.transcript li.agent {
   border-left: 4px solid var(--accent);
 }
 
@@ -286,6 +239,8 @@ body {
 }
 
 .transcript .body {
+  display: block;
+  margin-top: 0.15rem;
   white-space: pre-line;
   line-height: 1.55;
 }
@@ -301,6 +256,64 @@ body {
   border: 0;
   background: transparent;
   animation: none;
+}
+
+.transcript li.card {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(15, 107, 92, 0.22);
+}
+
+.transcript li.card--confirm {
+  border-left: 4px solid var(--accent);
+}
+
+.transcript li.card--success {
+  border-left: 4px solid #1f7a4d;
+  background: rgba(15, 107, 92, 0.1);
+}
+
+.card__title {
+  margin: 0.15rem 0 0.55rem;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.card__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.card__list > li {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: rgba(247, 251, 249, 0.95);
+  animation: none;
+}
+
+.card__name {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.card__meta {
+  margin-top: 0.2rem;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.card__foot {
+  margin: 0.7rem 0 0;
+  color: var(--accent-deep);
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
 .booking-ref {
@@ -356,9 +369,5 @@ body {
 
   .console {
     padding: 1.25rem;
-  }
-
-  .text-row {
-    grid-template-columns: 1fr;
   }
 }

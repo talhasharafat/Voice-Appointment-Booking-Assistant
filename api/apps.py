@@ -1,7 +1,7 @@
 from django.apps import AppConfig
 
 
-class AiConfig(AppConfig):
+class ApiConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "ai"
-    verbose_name = "AI"
+    name = "api"
+    verbose_name = "Booking API"

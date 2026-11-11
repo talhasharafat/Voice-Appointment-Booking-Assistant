@@ -71,7 +71,7 @@ def blocking_intervals(doctor, window_start, window_end):
     intervals = []
     appointments = Appointment.objects.filter(
         doctor=doctor,
-        status=Appointment.Status.CONFIRMED,
+        status__in=[Appointment.Status.CONFIRMED, Appointment.Status.PENDING],
         starts_at__lt=window_end,
         ends_at__gt=window_start,
     )

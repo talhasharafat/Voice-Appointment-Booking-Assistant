@@ -1,5 +1,9 @@
 (function () {
   const config = window.VOICE_CONFIG || {};
+  const TOKEN_URL = config.tokenUrl || "/voice/api/livekit/token/";
+  const LIVEKIT_URL = config.livekitUrl || "ws://127.0.0.1:7880";
+
+  const LivekitClient = window.LivekitClient || window.LiveKit || window.livekit;
   const statusEl = document.getElementById("status");
   const micButton = document.getElementById("micButton");
   const micHint = document.getElementById("micHint");
@@ -7,482 +11,461 @@
   const endButton = document.getElementById("endButton");
   const transcriptEl = document.getElementById("transcript");
   const bookingRefEl = document.getElementById("bookingRef");
-  const textForm = document.getElementById("textForm");
-  const textInput = document.getElementById("textInput");
-  const continuousMicInput = document.getElementById("continuousMic");
+  const remoteAudio = document.getElementById("remoteAudio");
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let sessionId = null;
-  let busy = false;
-  let recognition = null;
-  let listening = false;
-  let wantListening = false;
-  let speaking = false;
-  let restartTimer = null;
-
-  const STORAGE_KEY = "voiceContinuousMic";
-
-  function continuousEnabled() {
-    if (continuousMicInput) {
-      return !!continuousMicInput.checked;
-    }
-    return !!config.continuousMic;
-  }
-
-  function loadContinuousPreference() {
-    if (!continuousMicInput) {
-      return;
-    }
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved === "true" || saved === "false") {
-      continuousMicInput.checked = saved === "true";
-    } else {
-      continuousMicInput.checked = !!config.continuousMic;
-    }
-  }
+  let room = null;
+  let connected = false;
+  let connecting = false;
+  const activeByRole = { user: null, agent: null };
+  const flushTimers = { user: null, agent: null };
+  const activeSegId = { user: null, agent: null };
 
   function setStatus(message) {
     statusEl.textContent = message;
   }
 
-  function renderRichText(container, text) {
-    const lines = String(text || "").split("\n");
-    const listItems = [];
-
-    function flushList() {
-      if (!listItems.length) {
-        return;
-      }
-      const ol = document.createElement("ol");
-      listItems.forEach(function (entry) {
-        const li = document.createElement("li");
-        li.textContent = entry;
-        ol.appendChild(li);
-      });
-      container.appendChild(ol);
-      listItems.length = 0;
-    }
-
-    lines.forEach(function (line) {
-      const match = line.match(/^\s*(\d+)\.\s+(.*)$/);
-      if (match) {
-        listItems.push(match[2]);
-        return;
-      }
-      flushList();
-      if (!line.trim()) {
-        container.appendChild(document.createElement("br"));
-        return;
-      }
-      const row = document.createElement("div");
-      row.textContent = line;
-      container.appendChild(row);
-    });
-    flushList();
-  }
-
-  function appendMessage(role, text) {
-    const item = document.createElement("li");
-    item.className = role;
-    const who = document.createElement("span");
-    who.className = "who";
-    who.textContent = role === "assistant" ? "Clinic desk" : "You";
-    const body = document.createElement("div");
+  function appendLine(role, text) {
+    if (!text) return null;
+    const li = document.createElement("li");
+    li.className = role === "user" ? "user" : "agent";
+    const label = document.createElement("strong");
+    label.className = "who";
+    label.textContent = role === "user" ? "You" : "Agent";
+    const body = document.createElement("span");
     body.className = "body";
-    if (role === "assistant") {
-      renderRichText(body, text);
-    } else {
-      body.textContent = text;
-    }
-    item.appendChild(who);
-    item.appendChild(body);
-    transcriptEl.prepend(item);
-    item.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    body.textContent = text;
+    li.appendChild(label);
+    li.appendChild(body);
+    transcriptEl.appendChild(li);
+    li.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return { li: li, body: body };
   }
 
-  function speak(text) {
-    if (!window.speechSynthesis || !text) {
-      scheduleListenRestart(250);
-      return Promise.resolve();
+  function longestOverlap(a, b) {
+    const max = Math.min(a.length, b.length);
+    for (let k = max; k > 0; k--) {
+      if (a.slice(-k) === b.slice(0, k)) return k;
     }
-    return new Promise(function (resolve) {
-      window.speechSynthesis.cancel();
-      speaking = true;
-      pauseListeningForSpeech();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1;
-      utterance.pitch = 1;
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(function (voice) {
-        return /en-(GB|US|IN|PK)/i.test(voice.lang);
-      });
-      if (preferred) {
-        utterance.voice = preferred;
+    return 0;
+  }
+
+  function mergeSpokenText(previous, next) {
+    const prev = (previous || "").trim();
+    const text = (next || "").trim();
+    if (!text) return prev;
+    if (!prev) return text;
+    if (text === prev) return prev;
+    if (text.startsWith(prev)) return text;
+    if (prev.startsWith(text)) return prev;
+    if (prev.endsWith(text)) return prev;
+
+    // Growing rewrite of the trailing clause after '?'
+    const q = prev.lastIndexOf("?");
+    if (q >= 0) {
+      const head = prev.slice(0, q + 1).trim();
+      const tail = prev.slice(q + 1).trim();
+      if (!tail) return (head + " " + text).replace(/\s+/g, " ").trim();
+      if (text.startsWith(tail) || tail.startsWith(text)) {
+        const better = text.length >= tail.length ? text : tail;
+        return (head + " " + better).replace(/\s+/g, " ").trim();
       }
-      utterance.onend = function () {
-        speaking = false;
-        resolve();
-        scheduleListenRestart(350);
-      };
-      utterance.onerror = function () {
-        speaking = false;
-        resolve();
-        scheduleListenRestart(350);
-      };
-      window.speechSynthesis.speak(utterance);
-    });
-  }
-
-  async function postJson(url, payload) {
-    let response;
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload || {}),
-      });
-    } catch (error) {
-      throw new Error(
-        "I could not reach the clinic server and did not book an appointment. Check your connection and try again."
-      );
+      // Progressive stutter fragments: replace tail with the longer next phrase.
+      if (text.length > 8 && (tail.indexOf(text.slice(0, 8)) >= 0 || text.indexOf(tail.slice(0, Math.min(8, tail.length))) >= 0)) {
+        return (head + " " + (text.length >= tail.length ? text : tail)).replace(/\s+/g, " ").trim();
+      }
     }
 
-    let data;
+    const overlap = longestOverlap(prev, text);
+    if (overlap >= 3) {
+      return (prev + text.slice(overlap)).replace(/\s+/g, " ").trim();
+    }
+
+    // Prefer the longer string when one roughly contains the other.
+    if (prev.length > 20 && text.indexOf(prev.slice(0, 20)) >= 0) return text;
+    if (text.length > 20 && prev.indexOf(text.slice(0, 20)) >= 0) return prev;
+
+    return (prev + " " + text).replace(/\s+/g, " ").trim();
+  }
+
+  function closeRole(role) {
+    if (flushTimers[role]) {
+      clearTimeout(flushTimers[role]);
+      flushTimers[role] = null;
+    }
+    activeByRole[role] = null;
+    activeSegId[role] = null;
+  }
+
+  function upsertSpoken(role, text, isFinal, segId) {
+    if (!text) return;
+    let row = activeByRole[role];
+
+    if (segId && activeSegId[role] && segId === activeSegId[role] && row) {
+      row.body.textContent = mergeSpokenText(row.body.textContent, text);
+      row.li.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } else if (!row && role === "agent") {
+      const last = transcriptEl.lastElementChild;
+      if (last && last.classList.contains("agent") && !last.classList.contains("card")) {
+        const body = last.querySelector(".body");
+        const prev = (body && body.textContent) || "";
+        if (
+          text === prev ||
+          text.startsWith(prev) ||
+          prev.startsWith(text) ||
+          longestOverlap(prev, text) >= 8
+        ) {
+          row = { li: last, body: body };
+          activeByRole[role] = row;
+          row.body.textContent = mergeSpokenText(prev, text);
+        }
+      }
+    }
+
+    if (!row) {
+      row = appendLine(role, text);
+      activeByRole[role] = row;
+      if (segId) activeSegId[role] = segId;
+    } else if (!(segId && activeSegId[role] === segId)) {
+      row.body.textContent = mergeSpokenText(row.body.textContent, text);
+      row.li.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      if (segId) activeSegId[role] = segId;
+    }
+
+    if (flushTimers[role]) clearTimeout(flushTimers[role]);
+    flushTimers[role] = setTimeout(
+      function () {
+        closeRole(role);
+      },
+      isFinal ? (role === "agent" ? 1800 : 150) : role === "agent" ? 2200 : 1000
+    );
+  }
+
+  function formatSlot(iso) {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return d.toLocaleString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    } catch (err) {
+      return String(iso);
+    }
+  }
+
+  function appendCard(title, rows, opts) {
+    opts = opts || {};
+    const li = document.createElement("li");
+    li.className = "agent card";
+    if (opts.tone) li.classList.add("card--" + opts.tone);
+
+    const who = document.createElement("strong");
+    who.className = "who";
+    who.textContent = opts.who || "Details";
+    li.appendChild(who);
+
+    const heading = document.createElement("div");
+    heading.className = "card__title";
+    heading.textContent = title;
+    li.appendChild(heading);
+
+    if (rows && rows.length) {
+      const list = document.createElement("ol");
+      list.className = "card__list";
+      rows.forEach(function (row) {
+        const item = document.createElement("li");
+        if (typeof row === "string") {
+          item.textContent = row;
+        } else {
+          const name = document.createElement("div");
+          name.className = "card__name";
+          name.textContent = row.title || "";
+          item.appendChild(name);
+          if (row.meta) {
+            const meta = document.createElement("div");
+            meta.className = "card__meta";
+            meta.textContent = row.meta;
+            item.appendChild(meta);
+          }
+        }
+        list.appendChild(item);
+      });
+      li.appendChild(list);
+    }
+
+    if (opts.footnote) {
+      const foot = document.createElement("p");
+      foot.className = "card__foot";
+      foot.textContent = opts.footnote;
+      li.appendChild(foot);
+    }
+
+    transcriptEl.appendChild(li);
+    li.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return li;
+  }
+
+  function handleUiEvent(parsed) {
+    const type = parsed && parsed.type;
+    if (!type) return;
+
+    if (type === "doctors") {
+      const doctors = parsed.doctors || [];
+      const rows = doctors.map(function (d, idx) {
+        const slots = (d.next_open_slots || [])
+          .slice(0, 3)
+          .map(function (s) {
+            return formatSlot(s.starts_at || s);
+          })
+          .filter(Boolean);
+        return {
+          title: idx + 1 + ". " + (d.name || "Doctor"),
+          meta: slots.length ? "Next: " + slots.join(" · ") : "Ask for available times",
+        };
+      });
+      appendCard(
+        parsed.specialty_name
+          ? "Doctors for " + parsed.specialty_name
+          : "Available doctors",
+        rows,
+        { who: "Doctors", footnote: "Say the doctor name or number." }
+      );
+      return;
+    }
+
+    if (type === "slots") {
+      const slots = parsed.slots || [];
+      const rows = slots.map(function (s, idx) {
+        return idx + 1 + ". " + formatSlot(s.starts_at || s);
+      });
+      const title = parsed.doctor_name
+        ? "Open times — " + parsed.doctor_name
+        : "Open times";
+      appendCard(title, rows, {
+        who: "Schedule",
+        footnote:
+          parsed.preferred_available === false
+            ? "Preferred time unavailable — pick one of these."
+            : "Say a time from the list.",
+      });
+      return;
+    }
+
+    if (type === "confirmation") {
+      const rows = [
+        { title: "Patient", meta: parsed.patient_name || "—" },
+        { title: "Phone", meta: parsed.phone || "—" },
+        { title: "Doctor", meta: parsed.doctor_name || "—" },
+        { title: "Time", meta: formatSlot(parsed.slot_start) || "—" },
+        { title: "Reason", meta: parsed.reason || "—" },
+      ];
+      appendCard("Please confirm this booking", rows, {
+        who: "Confirmation",
+        tone: "confirm",
+        footnote: "Say yes to book, or no to cancel.",
+      });
+      return;
+    }
+
+    if (type === "booking") {
+      const ref = parsed.booking_reference || "";
+      const rows = [
+        { title: "Reference", meta: ref || "—" },
+        { title: "Patient", meta: parsed.patient_name || "—" },
+        { title: "Doctor", meta: parsed.doctor_name || "—" },
+        { title: "Time", meta: formatSlot(parsed.slot_start) || "—" },
+        { title: "Reason", meta: parsed.reason || "—" },
+      ];
+      appendCard("Appointment confirmed", rows, {
+        who: "Booking",
+        tone: "success",
+      });
+      if (bookingRefEl && ref) {
+        bookingRefEl.hidden = false;
+        bookingRefEl.textContent = "Booking reference: " + ref;
+      }
+      setStatus("Booked — reference " + ref);
+      return;
+    }
+
+    if (type === "specialty" && parsed.clarifying_question) {
+      appendCard("Need a quick clarification", [], {
+        who: "Specialty",
+        footnote: parsed.clarifying_question,
+      });
+    }
+  }
+
+  function setConnected(isOn) {
+    connected = isOn;
+    micButton.setAttribute("aria-pressed", isOn ? "true" : "false");
+    startButton.disabled = isOn;
+    endButton.disabled = !isOn;
+    micHint.textContent = isOn ? "Connected — speak naturally" : "Tap to connect and speak";
+  }
+
+  async function fetchToken() {
+    const response = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    let data = {};
     try {
       data = await response.json();
-    } catch (error) {
+    } catch (err) {
+      throw new Error("Token endpoint returned non-JSON (HTTP " + response.status + ").");
+    }
+    if (!response.ok || !data.ok) {
       throw new Error(
-        "The clinic server returned an unexpected response. No appointment was booked."
+        (data.error && data.error.message) ||
+          "Could not get LiveKit token (HTTP " + response.status + ")."
       );
     }
-
-    if (!response.ok && data && data.error) {
-      throw new Error(data.error.message || "Request failed. No appointment was booked.");
+    if (!data.token) {
+      throw new Error("Token endpoint did not return a token.");
     }
     return data;
   }
 
-  function applyAssistantPayload(data, options) {
-    options = options || {};
-    if (!data || !data.ok) {
-      const message =
-        (data && data.error && data.error.message) ||
-        "Something went wrong and no appointment was booked.";
-      setStatus(message);
-      appendMessage("assistant", message);
-      speak(message);
-      return;
-    }
-
-    sessionId = data.session_id;
-    endButton.disabled = data.status !== "active";
-    micButton.disabled = data.status !== "active";
-    startButton.disabled = data.status === "active";
-
-    if (!options.skipTranscript) {
-      appendMessage("assistant", data.message);
-    }
-    setStatus(
-      data.booked
-        ? "Booking confirmed."
-        : data.status === "abandoned"
-          ? "Session ended without a booking."
-          : data.status === "failed"
-            ? "Booking failed. Nothing was saved."
-            : continuousEnabled()
-              ? "Listening continuously…"
-              : "Listening for your next reply."
-    );
-    speak(data.message);
-
-    if (data.booked && data.data && data.data.booking_reference) {
-      bookingRefEl.hidden = false;
-      bookingRefEl.textContent = "Booking reference: " + data.data.booking_reference;
-    }
-
-    if (data.status !== "active") {
-      wantListening = false;
-      stopRecognition(true);
-      sessionId = data.booked ? data.session_id : null;
-      micHint.textContent = data.booked ? "Booking finished" : "Start a new booking";
-      startButton.disabled = false;
-      endButton.disabled = true;
-    } else if (continuousEnabled()) {
-      wantListening = true;
-    }
-  }
-
-  async function startSession() {
-    if (busy) {
-      return;
-    }
-    busy = true;
-    setStatus("Starting booking desk…");
-    try {
-      transcriptEl.innerHTML = "";
-      bookingRefEl.hidden = true;
-      bookingRefEl.textContent = "";
-      window.speechSynthesis && window.speechSynthesis.cancel();
-      const data = await postJson(config.startUrl, {});
-      applyAssistantPayload(data);
-      if (data && data.status === "active" && continuousEnabled()) {
-        wantListening = true;
-        startListening();
-      }
-    } catch (error) {
-      setStatus(error.message || "Could not start session.");
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function sendTurn(text) {
-    const cleaned = (text || "").trim();
-    if (!cleaned || busy) {
-      return;
-    }
-    if (!sessionId) {
-      await startSession();
-    }
-    if (!sessionId) {
-      return;
-    }
-    busy = true;
-    pauseListeningForSpeech();
-    appendMessage("user", cleaned);
-    setStatus("Checking with the clinic calendar…");
-    try {
-      const data = await postJson(config.turnUrl, {
-        session_id: sessionId,
-        text: cleaned,
+  function attachRemoteAudio(track) {
+    const el = track.attach();
+    el.autoplay = true;
+    el.playsInline = true;
+    remoteAudio.appendChild(el);
+    const playAttempt = el.play();
+    if (playAttempt && playAttempt.catch) {
+      playAttempt.catch(function () {
+        setStatus("Tap the page if you cannot hear the agent (browser autoplay).");
       });
-      applyAssistantPayload(data);
-    } catch (error) {
-      const message = error.message || "I could not process that reply.";
-      appendMessage("assistant", message);
-      setStatus(message);
-      await speak(message);
-    } finally {
-      busy = false;
-      textInput.value = "";
     }
   }
 
-  async function endSession() {
-    if (!sessionId || busy) {
+  async function connectRoom() {
+    if (connecting) return;
+    if (!LivekitClient || !LivekitClient.Room) {
+      setStatus(
+        "LiveKit browser client failed to load. Check the CDN script, then hard-refresh the page."
+      );
       return;
     }
-    busy = true;
-    wantListening = false;
-    stopRecognition(true);
+    if (connected) {
+      await disconnectRoom();
+      return;
+    }
+
+    connecting = true;
+    setStatus("Connecting to LiveKit…");
     try {
-      const data = await postJson(config.abandonUrl, { session_id: sessionId });
-      applyAssistantPayload(data);
-      sessionId = null;
-      startButton.disabled = false;
-      endButton.disabled = true;
-      micButton.disabled = false;
-    } catch (error) {
-      setStatus(error.message || "Could not end session.");
+      const creds = await fetchToken();
+      const serverUrl = creds.url || LIVEKIT_URL;
+      if (!serverUrl || serverUrl === "undefined") {
+        throw new Error(
+          "LiveKit URL is missing. Set LIVEKIT_URL=ws://127.0.0.1:7880 in .env and restart Django."
+        );
+      }
+
+      room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+
+      room.on(LivekitClient.RoomEvent.TrackSubscribed, function (track, publication, participant) {
+        if (
+          track.kind === "audio" ||
+          (LivekitClient.Track && track.kind === LivekitClient.Track.Kind.Audio)
+        ) {
+          attachRemoteAudio(track);
+          var who = (participant && participant.identity) || "agent";
+          setStatus("Connected to " + who + ". Wait for the greeting, then answer.");
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.ParticipantConnected, function () {
+        setStatus("Agent joined the room. Preparing greeting…");
+      });
+
+      room.on(LivekitClient.RoomEvent.TrackUnsubscribed, function (track) {
+        track.detach().forEach(function (el) {
+          el.remove();
+        });
+      });
+
+      room.on(LivekitClient.RoomEvent.Disconnected, function () {
+        setConnected(false);
+        setStatus("Disconnected. No appointment is saved until you confirm a booking.");
+      });
+
+      room.on(LivekitClient.RoomEvent.DataReceived, function (payload) {
+        try {
+          const text = new TextDecoder().decode(payload);
+          const parsed = JSON.parse(text);
+          if (!parsed) return;
+          if (parsed.type) {
+            handleUiEvent(parsed);
+            return;
+          }
+          if (parsed.text && (parsed.role === "system" || parsed.type === "booking")) {
+            appendLine(parsed.role || "agent", parsed.text);
+          }
+        } catch (err) {
+          // Ignore non-JSON data packets.
+        }
+      });
+
+      if (LivekitClient.RoomEvent.TranscriptionReceived) {
+        room.on(LivekitClient.RoomEvent.TranscriptionReceived, function (segments, participant) {
+          const isLocal =
+            participant &&
+            room.localParticipant &&
+            participant.identity === room.localParticipant.identity;
+          const role = isLocal ? "user" : "agent";
+          (segments || []).forEach(function (seg) {
+            const text = (seg.text || "").trim();
+            if (!text) return;
+            const isFinal = seg.final === true || seg.isFinal === true;
+            const segId = seg.id || seg.segmentId || seg.sid || null;
+            upsertSpoken(role, text, isFinal, segId);
+          });
+        });
+      }
+
+      await room.connect(serverUrl, creds.token);
+      await room.localParticipant.setMicrophoneEnabled(true);
+      setConnected(true);
+      setStatus("Connected. Waiting for the local agent worker…");
     } finally {
-      busy = false;
+      connecting = false;
     }
   }
 
-  function setListening(active) {
-    listening = active;
-    micButton.classList.toggle("is-listening", active);
-    micButton.setAttribute("aria-pressed", active ? "true" : "false");
-    if (active) {
-      micHint.textContent = continuousEnabled()
-        ? "Listening continuously… tap mic to pause"
-        : "Listening… tap again to stop";
-    } else if (wantListening && continuousEnabled()) {
-      micHint.textContent = "Microphone paused briefly…";
-    } else {
-      micHint.textContent = "Tap to speak";
+  async function disconnectRoom() {
+    if (room) {
+      await room.disconnect();
+      room = null;
     }
+    closeRole("user");
+    closeRole("agent");
+    remoteAudio.innerHTML = "";
+    setConnected(false);
+    setStatus("Ended. Nothing was booked unless the agent confirmed a reference.");
   }
 
-  function stopRecognition(clearWant) {
-    if (clearWant) {
-      wantListening = false;
-    }
-    if (restartTimer) {
-      window.clearTimeout(restartTimer);
-      restartTimer = null;
-    }
-    if (recognition && listening) {
-      try {
-        recognition.stop();
-      } catch (error) {
-        // ignore
-      }
-    }
-    setListening(false);
-  }
-
-  function pauseListeningForSpeech() {
-    if (recognition && listening) {
-      try {
-        recognition.stop();
-      } catch (error) {
-        // ignore
-      }
-    }
-  }
-
-  function scheduleListenRestart(delayMs) {
-    if (restartTimer) {
-      window.clearTimeout(restartTimer);
-    }
-    restartTimer = window.setTimeout(function () {
-      restartTimer = null;
-      if (wantListening && continuousEnabled() && sessionId && !busy && !speaking) {
-        startListening();
-      }
-    }, delayMs || 300);
-  }
-
-  function ensureRecognition() {
-    if (!SpeechRecognition) {
-      return null;
-    }
-    if (recognition) {
-      return recognition;
-    }
-    recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.continuous = false;
-
-    recognition.onstart = function () {
-      setListening(true);
-      if (!busy && !speaking) {
-        setStatus(continuousEnabled() ? "Listening continuously…" : "Listening…");
-      }
-    };
-    recognition.onerror = function (event) {
-      setListening(false);
-      if (event.error === "not-allowed") {
-        wantListening = false;
-        setStatus("Microphone permission blocked. Use the text box instead.");
-        return;
-      }
-      if (event.error === "aborted") {
-        return;
-      }
-      if (event.error === "no-speech" && wantListening && continuousEnabled()) {
-        scheduleListenRestart(400);
-        return;
-      }
-      setStatus("I could not hear clearly. Try again or type your reply.");
-      if (wantListening && continuousEnabled()) {
-        scheduleListenRestart(800);
-      }
-    };
-    recognition.onend = function () {
-      setListening(false);
-      if (wantListening && continuousEnabled() && sessionId && !busy && !speaking) {
-        scheduleListenRestart(350);
-      }
-    };
-    recognition.onresult = function (event) {
-      const transcript = event.results[0] && event.results[0][0] && event.results[0][0].transcript;
-      if (transcript) {
-        sendTurn(transcript);
-      } else if (wantListening && continuousEnabled()) {
-        scheduleListenRestart(400);
-      } else {
-        setStatus("I did not catch that. Please try again.");
-      }
-    };
-    return recognition;
-  }
-
-  function startListening() {
-    if (!SpeechRecognition) {
-      setStatus("This browser has no free Web Speech mic support. Type your reply below. Chrome works best.");
-      textInput.focus();
-      return;
-    }
-    if (busy || speaking) {
-      scheduleListenRestart(400);
-      return;
-    }
-    const engine = ensureRecognition();
-    if (!engine || listening) {
-      return;
-    }
-    window.speechSynthesis && window.speechSynthesis.cancel();
-    try {
-      engine.start();
-    } catch (error) {
-      scheduleListenRestart(600);
-    }
-  }
-
-  function toggleMic() {
-    if (busy) {
-      return;
-    }
-    if (!SpeechRecognition) {
-      setStatus("This browser has no free Web Speech mic support. Type your reply below. Chrome works best.");
-      textInput.focus();
-      return;
-    }
-    if (listening || wantListening) {
-      wantListening = false;
-      stopRecognition(true);
-      setStatus("Microphone paused.");
-      micHint.textContent = "Tap to speak";
-      return;
-    }
-    if (!sessionId) {
-      startSession();
-      return;
-    }
-    wantListening = continuousEnabled();
-    startListening();
-  }
-
-  micButton.addEventListener("click", toggleMic);
-  startButton.addEventListener("click", startSession);
-  endButton.addEventListener("click", endSession);
-  textForm.addEventListener("submit", function (event) {
-    event.preventDefault();
-    sendTurn(textInput.value);
-  });
-  if (continuousMicInput) {
-    loadContinuousPreference();
-    continuousMicInput.addEventListener("change", function () {
-      window.localStorage.setItem(STORAGE_KEY, continuousMicInput.checked ? "true" : "false");
-      if (continuousMicInput.checked && sessionId && !busy) {
-        wantListening = true;
-        startListening();
-      } else if (!continuousMicInput.checked) {
-        wantListening = false;
-        stopRecognition(true);
-      }
+  function onConnectClick() {
+    connectRoom().catch(function (err) {
+      console.error(err);
+      setStatus(err.message || "Could not connect.");
+      setConnected(false);
     });
   }
 
-  if (!SpeechRecognition) {
-    setStatus("Mic speech recognition is unavailable here. You can still book by typing.");
-    micHint.textContent = "Typing mode";
-  } else {
-    setStatus(
-      continuousEnabled()
-        ? "Ready · continuous mic can stay on after Start booking"
-        : "Ready · tap mic for each reply"
-    );
-  }
-
-  if (window.speechSynthesis) {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.onvoiceschanged = function () {
-      window.speechSynthesis.getVoices();
-    };
-  }
+  micButton.addEventListener("click", onConnectClick);
+  startButton.addEventListener("click", onConnectClick);
+  endButton.addEventListener("click", function () {
+    disconnectRoom().catch(function () {
+      setConnected(false);
+    });
+  });
 })();

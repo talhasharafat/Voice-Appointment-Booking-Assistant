@@ -28,7 +28,7 @@ from clinic.models import Doctor, Patient, Specialty, Weekday, WorkingHours
 
 
 TZ = ZoneInfo("Asia/Karachi")
-SLOT = datetime(2026, 11, 9, 10, 0, tzinfo=TZ)
+SLOT = datetime(2027, 3, 1, 10, 0, tzinfo=TZ)
 
 
 @override_settings(
@@ -62,13 +62,12 @@ class BookingReliabilityTests(TransactionTestCase):
             contact_number=contact_number,
             reason="Fever",
             idempotency_key=idempotency_key,
-            now=datetime(2026, 11, 9, 8, 0, tzinfo=TZ),
+            now=datetime(2027, 3, 1, 8, 0, tzinfo=TZ),
         )
 
-    def test_model_has_no_pending_or_draft_status(self):
+    def test_model_status_choices(self):
         values = {choice.value for choice in Appointment.Status}
-        self.assertEqual(values, {"confirmed", "cancelled"})
-        self.assertNotIn("pending", values)
+        self.assertEqual(values, {"pending", "confirmed", "cancelled"})
         self.assertNotIn("draft", values)
         self.assertNotIn("unconfirmed", values)
 
@@ -80,9 +79,9 @@ class BookingReliabilityTests(TransactionTestCase):
         find_doctors(specialty_id=self.specialty.id)
         check_availability(
             doctor_id=self.doctor.id,
-            day="2026-11-09",
+            day="2027-03-01",
             preferred_starts_at=SLOT.isoformat(),
-            now=datetime(2026, 11, 9, 8, 0, tzinfo=TZ),
+            now=datetime(2027, 3, 1, 8, 0, tzinfo=TZ),
         )
         get_or_create_patient("Abandoned Caller", "03990000001")
 
@@ -117,12 +116,12 @@ class BookingReliabilityTests(TransactionTestCase):
             "idempotency_key": "http-retry-key",
         }
         first = self.client.post(
-            "/booking/api/appointments/",
+            "/api/appointments/",
             data=payload,
             content_type="application/json",
         )
         second = self.client.post(
-            "/booking/api/appointments/",
+            "/api/appointments/",
             data=payload,
             content_type="application/json",
         )

@@ -13,7 +13,8 @@ from voice.parsing import datetime_missing_parts
 
 
 TZ = ZoneInfo("Asia/Karachi")
-SLOT = datetime(2026, 11, 9, 10, 0, tzinfo=TZ)
+SLOT = datetime(2027, 3, 1, 10, 0, tzinfo=TZ)
+FROZEN_NOW = datetime(2027, 2, 28, 9, 0, tzinfo=TZ)
 
 
 @override_settings(
@@ -39,6 +40,9 @@ class FailureHandlingTests(TestCase):
             start_time=time(9, 0),
             end_time=time(12, 0),
         )
+        self._now_patcher = patch("django.utils.timezone.now", return_value=FROZEN_NOW)
+        self._now_patcher.start()
+        self.addCleanup(self._now_patcher.stop)
 
     def _to_confirm(self):
         start = start_session()
