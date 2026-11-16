@@ -40,5 +40,6 @@ class VoiceStaticContractTests(SimpleTestCase):
         js = (Path(__file__).resolve().parents[2] / "static" / "voice" / "assistant.js").read_text()
         self.assertIn("LivekitClient", js)
         self.assertIn("setMicrophoneEnabled", js)
+        # Browser must not embed cloud LLM/STT endpoints — those stay in voice_agent.
         self.assertNotIn("api.openai.com", js.lower())
-        self.assertNotIn("groq", js.lower())
+        self.assertNotIn("api.deepseek.com", js.lower())

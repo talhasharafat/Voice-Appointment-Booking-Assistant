@@ -33,7 +33,8 @@ class Command(BaseCommand):
             defaults={
                 "description": (
                     "First-contact care for cough, fever, sore throat, blood pressure, "
-                    "fatigue, infections, routine check-ups, and other general illnesses. "
+                    "fatigue, dizziness, headache, nausea, infections, routine check-ups, "
+                    "and other general illnesses. "
                     "Not for dedicated skin, rash, or dermatology concerns."
                 )
             },

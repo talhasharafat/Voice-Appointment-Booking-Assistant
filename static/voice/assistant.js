@@ -96,8 +96,44 @@
     activeSegId[role] = null;
   }
 
+  function isJunkUserTranscript(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return true;
+    const norm = raw.toLowerCase().replace(/\s+/g, " ");
+    const blocked = [
+      "ignore background noise",
+      "do not invent speech",
+      "don't invent speech",
+      "clinic appointment booking conversation",
+      "thanks for watching",
+      "are you talking about the same thing",
+      "pats in media",
+      "flavio",
+      "pagaligial",
+      "i have a soul truth",
+      "how are you going to see the future",
+      "i'm going to go to the next step",
+      "i'm going to go to the next one",
+      "im going to go to the next step",
+      "im going to go to the next one",
+      "you're not going to be",
+      "get a little bit of a",
+      "so i'm going to go ahead",
+    ];
+    for (let i = 0; i < blocked.length; i++) {
+      if (norm.indexOf(blocked[i]) >= 0) return true;
+    }
+    // Repeated identical clause often means Whisper echo/hallucination.
+    const parts = norm.split(/[.!?]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (parts.length >= 2 && parts.every(function (p) { return p === parts[0]; })) {
+      return true;
+    }
+    return false;
+  }
+
   function upsertSpoken(role, text, isFinal, segId) {
     if (!text) return;
+    if (role === "user" && isJunkUserTranscript(text)) return;
     let row = activeByRole[role];
 
     if (segId && activeSegId[role] && segId === activeSegId[role] && row) {

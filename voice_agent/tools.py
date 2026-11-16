@@ -24,6 +24,21 @@ HTTP_TIMEOUT = float(os.getenv("DJANGO_API_TIMEOUT", "15"))
 _STOPWORDS = {
     "a", "an", "and", "for", "have", "i", "my", "of", "on", "the", "to", "with",
     "need", "want", "please", "appointment", "doctor", "visit", "see",
+    "dont", "don't", "know", "not", "that", "this", "feeling", "feel", "am", "im",
+}
+
+# Common spoken symptoms → specialty bias when description keywords miss.
+_GP_HINTS = {
+    "dizzy", "dizziness", "vertigo", "lightheaded", "lightheadedness",
+    "headache", "migraine", "fever", "cough", "cold", "flu", "sore",
+    "throat", "fatigue", "tired", "nausea", "vomit", "vomiting", "sick",
+    "ill", "illness", "infection", "pressure", "checkup", "check",
+    "pain", "ache", "general", "bp", "blood",
+}
+_DERM_HINTS = {
+    "skin", "rash", "acne", "eczema", "psoriasis", "itch", "itching",
+    "itchy", "mole", "hair", "nail", "nails", "dermatology", "dandruff",
+    "hives", "wart", "scalp",
 }
 
 
@@ -70,6 +85,35 @@ def _next_open_slots(doctor_id: int, days: int = 7, limit: int = 3) -> list[dict
     return slots
 
 
+def _specialty_by_name(specialties: list[dict[str, Any]], needle: str) -> Optional[dict[str, Any]]:
+    needle_l = needle.lower()
+    for item in specialties:
+        name = (item.get("name") or "").lower()
+        if needle_l in name or name in needle_l:
+            return item
+    return None
+
+
+def _matched_payload(specialty: dict[str, Any], *, message: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "status": "matched",
+        "message": message,
+        "matches": [
+            {
+                "specialty_id": specialty["id"],
+                "name": specialty.get("name"),
+                "description": specialty.get("description"),
+                "score": 10,
+                "matched_terms": [],
+            }
+        ],
+        "specialty_id": specialty["id"],
+        "specialty_name": specialty.get("name"),
+        "specialty_description": specialty.get("description"),
+    }
+
+
 def match_specialty(reason: str) -> dict[str, Any]:
     """
     Step 2 of the patient journey: map reason → specialty via Django specialty list.
@@ -89,21 +133,47 @@ def match_specialty(reason: str) -> dict[str, Any]:
         specialties = _fetch_specialties()
         reason_tokens = set(_tokens(reason))
         reason_lower = reason.lower()
+        words = set(re.findall(r"[a-z0-9]+", reason_lower))
+
+        gp = _specialty_by_name(specialties, "general")
+        derm = _specialty_by_name(specialties, "derma")
+
+        # Direct patient answers to the GP vs derm clarifier.
+        wants_derm = bool(words & _DERM_HINTS) or "skin" in reason_lower
+        wants_gp = bool(words & _GP_HINTS) or "general" in reason_lower
+        if wants_derm and not wants_gp and derm:
+            return _matched_payload(
+                derm,
+                message="Matched specialty {} from skin/hair/nail cues.".format(
+                    derm.get("name")
+                ),
+            )
+        if wants_gp and not wants_derm and gp:
+            return _matched_payload(
+                gp,
+                message="Matched specialty {} from general illness cues.".format(
+                    gp.get("name")
+                ),
+            )
+
         scored = []
         for specialty in specialties:
-            corpus = "{} {}".format(
-                specialty.get("name", ""),
-                specialty.get("description", ""),
-            ).lower()
+            name = specialty.get("name") or ""
+            corpus = "{} {}".format(name, specialty.get("description", "")).lower()
             overlap = reason_tokens & set(_tokens(corpus))
             score = len(overlap)
-            if specialty.get("name", "").lower() in reason_lower:
+            if name.lower() in reason_lower:
                 score += 5
+            name_l = name.lower()
+            if "general" in name_l:
+                score += len(words & _GP_HINTS)
+            if "derma" in name_l:
+                score += len(words & _DERM_HINTS) * 2
             if score:
                 scored.append(
                     {
                         "specialty_id": specialty["id"],
-                        "name": specialty.get("name"),
+                        "name": name,
                         "description": specialty.get("description"),
                         "score": score,
                         "matched_terms": sorted(overlap),
@@ -112,6 +182,15 @@ def match_specialty(reason: str) -> dict[str, Any]:
 
         scored.sort(key=lambda item: (-item["score"], item["name"] or ""))
         if not scored:
+            # Symptom present but no keyword overlap: default GP for non-derm talk.
+            if gp and not wants_derm:
+                return _matched_payload(
+                    gp,
+                    message=(
+                        "No exact keyword match; defaulting to General Practice "
+                        "for this non-skin concern."
+                    ),
+                )
             names = [item.get("name") for item in specialties]
             return {
                 "ok": True,
@@ -129,6 +208,12 @@ def match_specialty(reason: str) -> dict[str, Any]:
         best = scored[0]
         contenders = [item for item in scored if item["score"] >= best["score"] - 1]
         if len(contenders) > 1 and best["score"] < 5:
+            # Vague "I don't know" after a symptom: prefer GP once.
+            if gp and wants_gp and not wants_derm:
+                return _matched_payload(
+                    gp,
+                    message="Resolved ambiguous reason to General Practice.",
+                )
             options = ", or ".join(item["name"] for item in contenders[:3])
             return {
                 "ok": True,
