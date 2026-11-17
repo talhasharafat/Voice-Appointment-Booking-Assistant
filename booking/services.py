@@ -18,6 +18,8 @@ from booking.calendar import (
     slot_duration,
     slot_from_start,
 )
+from django.conf import settings
+
 from booking.models import Appointment
 from clinic.models import Doctor, Patient, Specialty
 
@@ -76,9 +78,41 @@ def list_specialties():
             "id": specialty.id,
             "name": specialty.name,
             "description": specialty.description,
+            "is_default": bool(specialty.is_default),
         }
         for specialty in Specialty.objects.order_by("name")
     ]
+
+
+def default_specialty():
+    """Specialty marked default, else first by name. None if catalog is empty."""
+    specialty = Specialty.objects.filter(is_default=True).order_by("name").first()
+    if specialty is None:
+        specialty = Specialty.objects.order_by("name").first()
+    if specialty is None:
+        return None
+    return {
+        "id": specialty.id,
+        "name": specialty.name,
+        "description": specialty.description,
+        "is_default": bool(specialty.is_default),
+    }
+
+
+def clinic_config():
+    """Clinic runtime settings + specialty catalog for UI and the voice agent."""
+    specialties = list_specialties()
+    default = default_specialty()
+    return {
+        "clinic_timezone": settings.CLINIC_TIMEZONE,
+        "duration_minutes": int(settings.APPOINTMENT_DURATION_MINUTES),
+        "default_specialty": default,
+        "specialties": specialties,
+    }
+
+
+def doctor_timezone(doctor):
+    return (getattr(doctor, "timezone", None) or "").strip() or settings.CLINIC_TIMEZONE
 
 
 def find_doctors(specialty_id=None):
@@ -94,7 +128,7 @@ def find_doctors(specialty_id=None):
             "specialty_id": doctor.specialty_id,
             "specialty_name": doctor.specialty.name,
             "specialty_description": doctor.specialty.description,
-            "timezone": doctor.timezone,
+            "timezone": doctor_timezone(doctor),
         }
         for doctor in queryset
     ]

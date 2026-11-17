@@ -4,6 +4,7 @@ HTTP API under /api/.
 Domain logic lives in booking.services — this module only adapts HTTP.
 """
 
+from django.conf import settings
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -27,6 +28,12 @@ def specialties(request):
 
 
 @api_view(["GET"])
+def clinic_config(request):
+    """Timezone, slot length, default specialty, and full specialty catalog."""
+    return Response(services.clinic_config())
+
+
+@api_view(["GET"])
 def doctors(request):
     specialty_id = request.query_params.get("specialty_id")
     try:
@@ -43,6 +50,7 @@ def doctors(request):
             status=_status_for(exc),
         )
 
+    clinic_tz = settings.CLINIC_TIMEZONE
     return Response(
         [
             {
@@ -54,7 +62,7 @@ def doctors(request):
                     "name": row["specialty_name"],
                     "description": row.get("specialty_description", ""),
                 },
-                "timezone": row.get("timezone", "Asia/Karachi"),
+                "timezone": row.get("timezone") or clinic_tz,
             }
             for row in rows
         ]

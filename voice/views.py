@@ -136,6 +136,7 @@ def assistant(request):
         "voice/assistant.html",
         {
             "clinic_timezone": settings.CLINIC_TIMEZONE,
+            "appointment_duration_minutes": settings.APPOINTMENT_DURATION_MINUTES,
             "livekit_url": getattr(settings, "LIVEKIT_URL", None) or "ws://127.0.0.1:7880",
         },
     )

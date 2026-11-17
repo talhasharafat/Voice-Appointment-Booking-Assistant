@@ -38,10 +38,13 @@ class BookingFacts:
         "offered_slots",
         "offered_doctors",
         "booking_reference",
+        "default_specialty_name",
+        "explicit_yes",
+        "last_user_text",
         "_post_confirm_reply_index",
     )
 
-    def __init__(self) -> None:
+    def __init__(self, *, default_specialty_name: Optional[str] = None) -> None:
         self.patient_name: Optional[str] = None
         self.phone: Optional[str] = None
         self.reason: Optional[str] = None
@@ -53,10 +56,18 @@ class BookingFacts:
         self.offered_slots: list[Any] = []
         self.offered_doctors: list[dict[str, Any]] = []
         self.booking_reference: Optional[str] = None
+        self.default_specialty_name: Optional[str] = default_specialty_name
+        # Set only when the latest user turn is an unambiguous yes.
+        self.explicit_yes: bool = False
+        self.last_user_text: str = ""
         self._post_confirm_reply_index: int = 0
 
     def is_confirmed(self) -> bool:
         return bool(self.booking_reference)
+
+    def mark_user_turn(self, text: str, *, explicit_yes: bool) -> None:
+        self.last_user_text = (text or "").strip()
+        self.explicit_yes = bool(explicit_yes)
 
     def post_confirm_reply(self) -> str:
         """Natural variation of the locked-booking message."""
@@ -135,9 +146,9 @@ class BookingFacts:
             "reason": "Ask only for the reason for the visit. Phone is already known — never ask for phone again.",
             "specialty": (
                 "Call match_specialty with the reason. "
-                "If still unclear after one clarifier, default to General Practice. "
+                "If still unclear after one clarifier, default to {}. "
                 "Never re-ask name or phone."
-            ),
+            ).format(self.default_specialty_name or "the clinic default specialty"),
             "doctor": (
                 "Call find_doctors (no arguments). Then ask which doctor by name or list number. "
                 "Never re-ask name or phone."
@@ -149,10 +160,13 @@ class BookingFacts:
                 "Never re-ask name or phone."
             ),
             "confirm": (
-                "Read back name, phone, doctor, time, and reason once, then ask yes/no. "
-                "Call create_appointment(confirmed=true) only after explicit yes. "
-                "Never re-ask for phone — it is already {}.".format(self.phone or "saved")
-            ),
+                "Read back name, phone, doctor, time ({slot}), and reason. "
+                "Ask: say YES to book, or NO to cancel. "
+                "Do NOT call create_appointment unless KNOWN FACTS says EXPLICIT_YES=true. "
+                "Questions like 'can I?', phone changes, or anything that is not a clear yes "
+                "must NOT book — answer briefly and ask for yes/no again. "
+                "Phone is already {phone}."
+            ).format(slot=self.slot_start or "selected slot", phone=self.phone or "saved"),
         }.get(nxt, "Ask only for the next missing booking detail. Never re-ask saved fields.")
 
         if not parts:
@@ -163,7 +177,8 @@ class BookingFacts:
         locked = []
         if self.phone:
             locked.append(
-                "PHONE IS LOCKED at {}. NEVER ask for the phone number again.".format(
+                "PHONE IS LOCKED at {}. NEVER ask for the phone number again "
+                "(unless the patient clearly asks to change it before booking).".format(
                     self.phone
                 )
             )
@@ -173,12 +188,18 @@ class BookingFacts:
                     self.patient_name
                 )
             )
+        confirm_flag = (
+            "EXPLICIT_YES=true. You may call create_appointment(confirmed=true) now."
+            if self.explicit_yes and nxt == "confirm"
+            else "EXPLICIT_YES=false. Do NOT call create_appointment."
+        )
         return (
             "KNOWN FACTS (already collected — do NOT re-ask unless the patient corrects them): "
             + "; ".join(parts)
             + ". "
             + (" ".join(locked) + " " if locked else "")
-            + "NEXT STEP: "
+            + confirm_flag
+            + " NEXT STEP: "
             + guidance
         )
 

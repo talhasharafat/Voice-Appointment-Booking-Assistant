@@ -19,7 +19,7 @@
       <a href="/admin/">Staff admin</a>
     </nav>
     <header class="brand-block">
-      <p class="eyebrow">Asia/Karachi · 30-minute visits</p>
+      <p class="eyebrow">{{ clinic_timezone }} · {{ appointment_duration_minutes }}-minute visits</p>
       <h1 class="brand">Clinic Appointment</h1>
       <p class="lede">Book by voice over LiveKit. Tap the microphone to connect. This desk schedules only — it does not diagnose or prescribe.</p>
     </header>
@@ -60,6 +60,6 @@
       livekitUrl: "{{ livekit_url|default:'ws://127.0.0.1:7880'|escapejs }}"
     };
   </script>
-  <script src="{% static 'voice/assistant.js' %}?v=6"></script>
+  <script src="{% static 'voice/assistant.js' %}?v=8"></script>
 </body>
 </html>

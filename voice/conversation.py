@@ -235,23 +235,23 @@ def _handle_specialty_clarification(session, text):
                 specialty_id=option["specialty_id"],
                 specialty_name=option["name"],
             )
-    if "skin" in cleaned or "rash" in cleaned or "derm" in cleaned:
+    # Fall back to the clinic default specialty when the patient stays vague.
+    from booking.services import default_specialty
+
+    fallback = default_specialty()
+    if fallback is not None:
         for option in options:
-            if "derm" in option["name"].lower():
+            if option.get("specialty_id") == fallback["id"]:
                 return _after_specialty_selected(
                     session,
                     specialty_id=option["specialty_id"],
                     specialty_name=option["name"],
                 )
-        rematch = run_tool("match_specialty", {"reason": "rash skin " + session.data.get("reason", "")})
-        rem = rematch.get("result") or {}
-        if rematch.get("ok") and rem.get("status") == "matched":
-            return _after_specialty_selected(session, rem["specialty_id"], rem["specialty_name"])
-    if "general" in cleaned or "fever" in cleaned or "cough" in cleaned:
-        rematch = run_tool("match_specialty", {"reason": "cough fever " + session.data.get("reason", "")})
-        rem = rematch.get("result") or {}
-        if rematch.get("ok") and rem.get("status") == "matched":
-            return _after_specialty_selected(session, rem["specialty_id"], rem["specialty_name"])
+        return _after_specialty_selected(
+            session,
+            specialty_id=fallback["id"],
+            specialty_name=fallback["name"],
+        )
     question = session.data.get("clarifying_question") or "Which specialty should we use?"
     return "Still unclear. " + question, "specialty_choice"
 

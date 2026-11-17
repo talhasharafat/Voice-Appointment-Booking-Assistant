@@ -34,9 +34,9 @@ class Command(BaseCommand):
                 "description": (
                     "First-contact care for cough, fever, sore throat, blood pressure, "
                     "fatigue, dizziness, headache, nausea, infections, routine check-ups, "
-                    "and other general illnesses. "
-                    "Not for dedicated skin, rash, or dermatology concerns."
-                )
+                    "and other general illnesses."
+                ),
+                "is_default": True,
             },
         )
         derm, _ = Specialty.objects.update_or_create(
@@ -45,7 +45,8 @@ class Command(BaseCommand):
                 "description": (
                     "Skin, hair, and nail problems including rash, acne, eczema, "
                     "psoriasis, moles, itching, and other dermatology concerns."
-                )
+                ),
+                "is_default": False,
             },
         )
 

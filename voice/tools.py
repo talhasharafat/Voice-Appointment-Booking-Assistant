@@ -156,6 +156,12 @@ def match_specialty(reason):
     scored.sort(key=lambda item: (-item["score"], item["name"]))
     if not scored:
         names = [item.name for item in Specialty.objects.order_by("name")]
+        if len(names) >= 2:
+            clarifier = "Would you like {}?".format(", or ".join(names[:3]))
+        elif names:
+            clarifier = "Is this for {}?".format(names[0])
+        else:
+            clarifier = "Which specialty do you need?"
         return {
             "status": "no_match",
             "message": (
@@ -163,9 +169,7 @@ def match_specialty(reason):
                 "We currently offer: {}.".format(", ".join(names) or "none configured")
             ),
             "matches": [],
-            "clarifying_question": (
-                "Is this more of a general illness, or a skin, hair, or nail concern?"
-            ),
+            "clarifying_question": clarifier,
         }
 
     best = scored[0]

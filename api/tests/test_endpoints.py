@@ -62,6 +62,17 @@ class ApiEndpointTests(TransactionTestCase):
         self.assertEqual(doctors.status_code, 200)
         self.assertEqual([row["name"] for row in doctors.json()], ["Dr. API"])
 
+    def test_clinic_config_exposes_settings_and_default_specialty(self):
+        self.specialty.is_default = True
+        self.specialty.save()
+        response = self.client.get("/api/clinic-config/")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["clinic_timezone"], "Asia/Karachi")
+        self.assertEqual(body["duration_minutes"], 30)
+        self.assertEqual(body["default_specialty"]["name"], "General Practice")
+        self.assertEqual(len(body["specialties"]), 2)
+
     def test_availability_marks_preferred_slot(self):
         response = self.client.get(
             "/api/availability/",

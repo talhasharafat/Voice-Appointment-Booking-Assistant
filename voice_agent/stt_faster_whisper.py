@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import Optional
 
 import numpy as np
@@ -24,6 +25,13 @@ logger = logging.getLogger(__name__)
 _model = None
 _model_name: Optional[str] = None
 TARGET_SR = 16000
+
+# Short clinic vocabulary — helps Whisper lock onto confirmations / names.
+# Kept tiny so it does not echo as fake patient speech.
+_INITIAL_PROMPT = (
+    "Yes. No. Okay. Phone number. Appointment. Doctor. "
+    "Dermatology. General Practice."
+)
 
 
 def _load_model():
@@ -72,6 +80,25 @@ def _audio_float32_16k(frames) -> np.ndarray:
     return np.interp(x_new, x_old, audio).astype(np.float32)
 
 
+def _normalize_transcript(text: str) -> str:
+    """Clean Whisper punctuation / spacing without changing meaning."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    t = re.sub(r"\s+", " ", t).strip()
+    # Collapse "Yes ?" / "Yes ." style STT artifacts for display + confirm parsing.
+    t = re.sub(r"\s+([?!.])", r"\1", t)
+    return t
+
+
+def _beam_size() -> int:
+    raw = (os.getenv("WHISPER_BEAM_SIZE") or "5").strip()
+    try:
+        return max(1, min(8, int(raw)))
+    except ValueError:
+        return 5
+
+
 class FasterWhisperSTT(lk_stt.STT):
     def __init__(self) -> None:
         super().__init__(
@@ -96,43 +123,60 @@ class FasterWhisperSTT(lk_stt.STT):
     ) -> lk_stt.SpeechEvent:
         frames = _frames_from_buffer(buffer)
         audio = _audio_float32_16k(frames)
-        if audio.size < TARGET_SR * 0.15:
-            # Too short — almost always silence / noise spurts.
+        # Allow short "yes"/"no" (was 150ms — too aggressive and dropped confirms).
+        min_sec = float(os.getenv("WHISPER_MIN_AUDIO_SECONDS") or "0.08")
+        if audio.size < TARGET_SR * max(0.05, min_sec):
             return lk_stt.SpeechEvent(
                 type=lk_stt.SpeechEventType.FINAL_TRANSCRIPT, alternatives=[]
             )
 
         lang = language if language != NOT_GIVEN and language else self._language
         model = await asyncio.to_thread(_load_model)
+        beam = _beam_size()
 
         def _transcribe():
             segments, info = model.transcribe(
                 audio,
                 language=lang,
-                beam_size=1,
-                best_of=1,
+                beam_size=beam,
+                best_of=beam,
+                patience=1.0,
                 vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 400},
+                vad_parameters={"min_silence_duration_ms": 350},
                 condition_on_previous_text=False,
-                no_speech_threshold=0.65,
-                compression_ratio_threshold=2.4,
-                log_prob_threshold=-0.7,
+                initial_prompt=_INITIAL_PROMPT,
+                no_speech_threshold=0.55,
+                compression_ratio_threshold=2.6,
+                log_prob_threshold=-1.0,
+                temperature=[0.0, 0.2, 0.4],
             )
-            # Drop low-confidence / likely-no-speech results.
-            if getattr(info, "language_probability", 1.0) < 0.45:
+            if getattr(info, "language_probability", 1.0) < 0.35:
                 return ""
             parts = []
             for seg in segments:
                 t = (seg.text or "").strip()
                 if not t:
                     continue
-                # avg_logprob is typically negative; more negative = worse.
-                if getattr(seg, "no_speech_prob", 0.0) > 0.6:
+                if getattr(seg, "no_speech_prob", 0.0) > 0.7:
                     continue
-                if getattr(seg, "avg_logprob", 0.0) < -1.0:
+                # Keep short confirmations even if confidence is middling.
+                avg = getattr(seg, "avg_logprob", 0.0)
+                if len(t) <= 8 and t.lower().strip(" ?.!") in {
+                    "yes",
+                    "yeah",
+                    "yep",
+                    "yup",
+                    "no",
+                    "nope",
+                    "ok",
+                    "okay",
+                }:
+                    parts.append(t)
+                    continue
+                if avg < -1.2:
                     continue
                 parts.append(t)
-            return " ".join(parts).strip()
+            return _normalize_transcript(" ".join(parts))
 
         text = await asyncio.to_thread(_transcribe)
         if not text or is_hallucinated_transcript(text):
@@ -142,6 +186,7 @@ class FasterWhisperSTT(lk_stt.STT):
                 type=lk_stt.SpeechEventType.FINAL_TRANSCRIPT, alternatives=[]
             )
 
+        logger.info("faster-whisper text=%r", text[:160])
         return lk_stt.SpeechEvent(
             type=lk_stt.SpeechEventType.FINAL_TRANSCRIPT,
             alternatives=[lk_stt.SpeechData(language=lang, text=text, confidence=0.0)],

@@ -59,6 +59,7 @@ Swap points: `build_stt` / `build_llm` / `build_tts` in `voice_agent/pipeline.py
 
 | Method | Path |
 |--------|------|
+| GET | `/api/clinic-config/` |
 | GET | `/api/specialties/` |
 | GET | `/api/doctors/?specialty_id=` |
 | GET | `/api/availability/?doctor_id=&date=` |

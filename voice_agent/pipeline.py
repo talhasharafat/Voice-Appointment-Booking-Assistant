@@ -53,6 +53,8 @@ from voice_agent.tts_fish_audio import build_fish_tts, load_fish_tts_config
 from voice_agent.ui_events import publish_ui
 from voice_agent.utterance import (
     digits_from_utterance,
+    is_explicit_no,
+    is_explicit_yes,
     looks_like_reason,
     match_doctor_from_text,
     slot_start_from_choice,
@@ -61,8 +63,39 @@ from voice_agent.utterance import (
 
 logger = logging.getLogger("voice_agent.pipeline")
 
-SYSTEM_INSTRUCTIONS = """
-You are a clinic voice booking assistant (Asia/Karachi, ~30 min slots).
+GREETING = (
+    "Hello. I can help you book a clinic appointment. "
+    "I do not diagnose or prescribe. What is your full name?"
+)
+
+
+def _build_system_instructions(clinic: Optional[dict] = None) -> str:
+    """Build LLM instructions from Django clinic-config (not hardcoded specialties)."""
+    clinic = clinic or {}
+    timezone = clinic.get("clinic_timezone") or os.getenv("CLINIC_TIMEZONE") or "local clinic time"
+    duration = clinic.get("duration_minutes") or os.getenv("APPOINTMENT_DURATION_MINUTES") or "?"
+    specialties = clinic.get("specialties") or []
+    default = clinic.get("default_specialty") or {}
+    default_name = default.get("name") or "the clinic default specialty"
+
+    if specialties:
+        specialty_lines = []
+        for item in specialties:
+            name = item.get("name") or "Specialty"
+            desc = (item.get("description") or "").strip()
+            marker = " [default]" if item.get("is_default") else ""
+            if desc:
+                specialty_lines.append("- {}{}: {}".format(name, marker, desc))
+            else:
+                specialty_lines.append("- {}{}".format(name, marker))
+        specialty_block = "\n".join(specialty_lines)
+    else:
+        specialty_block = (
+            "- (Specialty catalog unavailable — call match_specialty and trust its result.)"
+        )
+
+    return f"""
+You are a clinic voice booking assistant ({timezone}, ~{duration} min slots).
 Only schedule. Never diagnose or prescribe.
 
 HARD MEMORY RULES
@@ -76,20 +109,20 @@ TURN RULES
 - Speak ONLY as the assistant. Never invent patient lines.
 - 1–2 short clean sentences. Ask ONE question, then STOP.
 - Plain speech only (no markdown).
-- Dizzy/fever/cough/pain → General Practice. Skin/rash/hair/nail → Dermatology.
-- After one unclear specialty clarifier, default to General Practice.
+- Match the visit reason with match_specialty using the clinic specialties below.
+- Never invent a specialty that is not listed.
+- After one unclear specialty clarifier, default to {default_name}.
+
+CLINIC SPECIALTIES
+{specialty_block}
 
 TOOLS (keep arguments minimal)
 1) match_specialty(reason)
 2) find_doctors()  — uses saved specialty
 3) check_availability(date)  — date as YYYY-MM-DD; uses saved doctor
-4) create_appointment(confirmed=true)  — only after patient says yes; uses saved facts
+4) create_appointment(confirmed=true)  — ONLY when KNOWN FACTS says EXPLICIT_YES=true
+   (clear yes/yeah/ok to book). Never treat questions or other topics as confirmation.
 """.strip()
-
-GREETING = (
-    "Hello. I can help you book a clinic appointment. "
-    "I do not diagnose or prescribe. What is your full name?"
-)
 
 MAX_CHAT_ITEMS = int(os.getenv("VOICE_MAX_CHAT_ITEMS", "14") or 14)
 
@@ -140,7 +173,8 @@ def _maybe_capture_facts(facts: BookingFacts, text: str) -> None:
         phone_match = re.search(r"(\+?\d[\d\s\-]{8,}\d)", raw)
         if phone_match:
             digits = re.sub(r"\D", "", phone_match.group(1))
-    if len(digits) >= 10:
+    # Accept a new phone anytime before the booking is finalized.
+    if len(digits) >= 10 and not facts.is_confirmed():
         facts.phone = digits
 
     if not facts.patient_name:
@@ -168,7 +202,8 @@ def _maybe_capture_facts(facts: BookingFacts, text: str) -> None:
             facts.doctor_id = int(doc["id"])
             facts.doctor_name = str(doc.get("name") or "")
 
-    if not facts.slot_start and facts.offered_slots:
+    # Allow choosing / changing the slot until booking is finalized.
+    if facts.offered_slots and not facts.is_confirmed():
         chosen = slot_start_from_choice(raw, facts.offered_slots)
         if chosen:
             facts.slot_start = chosen
@@ -177,9 +212,13 @@ def _maybe_capture_facts(facts: BookingFacts, text: str) -> None:
 class BookingAgent(Agent):
     """Conversational booking agent: DeepSeek LLM + Django tools + UI cards."""
 
-    def __init__(self) -> None:
-        super().__init__(instructions=SYSTEM_INSTRUCTIONS)
-        self.facts = BookingFacts()
+    def __init__(self, *, clinic_config: Optional[dict] = None) -> None:
+        clinic = clinic_config or {}
+        super().__init__(instructions=_build_system_instructions(clinic))
+        default = clinic.get("default_specialty") or {}
+        self.facts = BookingFacts(
+            default_specialty_name=default.get("name") or None,
+        )
 
     async def on_enter(self) -> None:
         await self.session.say(GREETING, allow_interruptions=False)
@@ -243,16 +282,44 @@ class BookingAgent(Agent):
             self.facts.phone,
             self.facts.next_missing(),
         )
+        prior_slot = self.facts.slot_start
         _maybe_capture_facts(self.facts, text)
+
+        # Confirmation is deterministic — never trust the LLM alone to book.
+        said_yes = is_explicit_yes(text)
+        said_no = is_explicit_no(text)
+        if self.facts.next_missing() == "confirm":
+            self.facts.mark_user_turn(text, explicit_yes=said_yes and not said_no)
+        else:
+            self.facts.mark_user_turn(text, explicit_yes=False)
+
         logger.info(
-            "facts after capture name=%r phone=%s reason=%r doctor=%s slot=%s next=%s",
+            "facts after capture name=%r phone=%s reason=%r doctor=%s slot=%s "
+            "next=%s explicit_yes=%s",
             self.facts.patient_name,
             self.facts.phone,
             (self.facts.reason or "")[:80],
             self.facts.doctor_id,
             self.facts.slot_start,
             self.facts.next_missing(),
+            self.facts.explicit_yes,
         )
+
+        # When a slot is newly chosen, show the confirmation card (do not book yet).
+        if (
+            self.facts.slot_start
+            and self.facts.slot_start != prior_slot
+            and self.facts.next_missing() == "confirm"
+        ):
+            await publish_ui(
+                "confirmation",
+                patient_name=self.facts.patient_name,
+                phone=self.facts.phone,
+                doctor_name=self.facts.doctor_name,
+                doctor_id=self.facts.doctor_id,
+                slot_start=self.facts.slot_start,
+                reason=self.facts.reason,
+            )
 
         try:
             turn_ctx.truncate(max_items=MAX_CHAT_ITEMS)
@@ -260,6 +327,16 @@ class BookingAgent(Agent):
             logger.exception("chat truncate failed")
 
         turn_ctx.add_message(role="system", content=self.facts.snapshot_message())
+        if self.facts.next_missing() == "confirm" and not self.facts.explicit_yes:
+            turn_ctx.add_message(
+                role="system",
+                content=(
+                    "The patient has NOT confirmed with a clear yes. "
+                    "Do not call create_appointment. "
+                    "If they asked something else, answer briefly, then ask them "
+                    "to say yes to book or no to cancel."
+                ),
+            )
 
     def tts_node(self, text, model_settings):
         return Agent.default.tts_node(self, strip_think_stream(text), model_settings)
@@ -401,16 +478,8 @@ class BookingAgent(Agent):
             status=result.get("status"),
             message=result.get("message"),
         )
-        if self.facts.slot_start:
-            await publish_ui(
-                "confirmation",
-                patient_name=self.facts.patient_name,
-                phone=self.facts.phone,
-                doctor_name=self.facts.doctor_name,
-                doctor_id=int(doctor_id),
-                slot_start=self.facts.slot_start,
-                reason=self.facts.reason,
-            )
+        # Confirmation card is shown only after the patient picks a slot
+        # (on_user_turn_completed), not on every availability lookup.
         return result
 
     @function_tool()
@@ -423,26 +492,41 @@ class BookingAgent(Agent):
         locked = self._reject_if_confirmed()
         if locked:
             return locked
-        if not confirmed:
+
+        # Hard gate: only the patient's spoken yes books. LLM confirmed= is advisory.
+        if not self.facts.explicit_yes:
+            logger.info(
+                "create_appointment blocked confirmed_arg=%s explicit_yes=%s last=%r",
+                confirmed,
+                self.facts.explicit_yes,
+                (self.facts.last_user_text or "")[:120],
+            )
             return {
                 "ok": False,
                 "error": {
                     "code": "not_confirmed",
-                    "message": "Patient has not confirmed. Ask yes/no first.",
+                    "message": (
+                        "Patient has not said a clear yes. "
+                        "Ask them to say yes to book, or no to cancel. Do not book yet."
+                    ),
                 },
+                "assistant_next_line": (
+                    "I still need a clear yes before I can book. "
+                    "Please say yes to confirm, or no to cancel."
+                ),
             }
+        if not confirmed:
+            logger.info(
+                "LLM passed confirmed=false but patient said yes (last=%r); booking anyway",
+                (self.facts.last_user_text or "")[:120],
+            )
 
         name = (self.facts.patient_name or "").strip()
         phone_n = re.sub(r"\D", "", self.facts.phone or "")
         reason_n = (self.facts.reason or "").strip()
         doc_id = self.facts.doctor_id
         slot = (self.facts.slot_start or "").strip()
-        if not slot and self.facts.offered_slots:
-            first = self.facts.offered_slots[0]
-            if isinstance(first, dict):
-                slot = str(first.get("starts_at") or first.get("start") or "")
-            else:
-                slot = str(first)
+        # Never invent a slot — patient must choose one from the offered list.
 
         missing = []
         if not name:
@@ -466,16 +550,8 @@ class BookingAgent(Agent):
                 },
             }
 
-        await publish_ui(
-            "confirmation",
-            patient_name=name,
-            phone=phone_n,
-            doctor_name=self.facts.doctor_name,
-            doctor_id=doc_id,
-            slot_start=slot,
-            reason=reason_n,
-        )
-
+        # Do not re-publish the yes/no confirmation card here — it was already
+        # shown when the slot was chosen. After yes, only the booked card belongs.
         key = "voice-{}".format(uuid.uuid4().hex)
         result = django_tools.create_appointment(
             patient_name=name,
@@ -486,6 +562,8 @@ class BookingAgent(Agent):
             idempotency_key=key,
         )
         self.facts.apply_booking(result)
+        # Consume the yes so a replay cannot double-book without a new yes.
+        self.facts.explicit_yes = False
         if result.get("ok"):
             await publish_ui(
                 "booking",
@@ -533,6 +611,19 @@ server = AgentServer(
 @server.rtc_session(agent_name="clinic-booking")
 async def clinic_booking(ctx: agents.JobContext):
     vad = ctx.proc.userdata.get("vad") or build_vad()
+    clinic = {}
+    try:
+        clinic = django_tools.fetch_clinic_config()
+        logger.info(
+            "clinic config timezone=%s duration=%s default=%s specialties=%s",
+            clinic.get("clinic_timezone"),
+            clinic.get("duration_minutes"),
+            (clinic.get("default_specialty") or {}).get("name"),
+            len(clinic.get("specialties") or []),
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to load clinic-config; using generic instructions")
+
     session = AgentSession(
         stt=build_stt(),
         llm=build_llm(),
@@ -553,7 +644,7 @@ async def clinic_booking(ctx: agents.JobContext):
 
     await session.start(
         room=ctx.room,
-        agent=BookingAgent(),
+        agent=BookingAgent(clinic_config=clinic),
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(),
             audio_output=room_io.AudioOutputOptions(),

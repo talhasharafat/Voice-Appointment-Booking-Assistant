@@ -16,6 +16,7 @@
   let room = null;
   let connected = false;
   let connecting = false;
+  let bookingCompleted = false;
   const activeByRole = { user: null, agent: null };
   const flushTimers = { user: null, agent: null };
   const activeSegId = { user: null, agent: null };
@@ -181,14 +182,18 @@
     try {
       const d = new Date(iso);
       if (isNaN(d.getTime())) return String(iso);
-      return d.toLocaleString(undefined, {
+      const opts = {
         weekday: "short",
         day: "numeric",
         month: "short",
         year: "numeric",
         hour: "numeric",
         minute: "2-digit",
-      });
+      };
+      if (config.clinicTimezone) {
+        opts.timeZone = config.clinicTimezone;
+      }
+      return d.toLocaleString(undefined, opts);
     } catch (err) {
       return String(iso);
     }
@@ -293,6 +298,10 @@
     }
 
     if (type === "confirmation") {
+      // After a successful booking, ignore any late/duplicate yes-no cards.
+      if (bookingCompleted) {
+        return;
+      }
       const rows = [
         { title: "Patient", meta: parsed.patient_name || "—" },
         { title: "Phone", meta: parsed.phone || "—" },
@@ -309,6 +318,7 @@
     }
 
     if (type === "booking") {
+      bookingCompleted = true;
       const ref = parsed.booking_reference || "";
       const rows = [
         { title: "Reference", meta: ref || "—" },
@@ -396,6 +406,7 @@
     }
 
     connecting = true;
+    bookingCompleted = false;
     setStatus("Connecting to LiveKit…");
     try {
       const creds = await fetchToken();

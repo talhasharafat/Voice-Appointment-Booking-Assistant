@@ -17,6 +17,13 @@ class Specialty(models.Model):
     description = models.TextField(
         help_text="Used to match a patient's reason for visit to this specialty."
     )
+    is_default = models.BooleanField(
+        default=False,
+        help_text=(
+            "When matching is unclear, the voice agent falls back to this specialty. "
+            "Only one specialty should be marked default."
+        ),
+    )
 
     class Meta:
         ordering = ["name"]
@@ -24,6 +31,13 @@ class Specialty(models.Model):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_default:
+            type(self).objects.exclude(pk=self.pk).filter(is_default=True).update(
+                is_default=False
+            )
 
 
 class Doctor(models.Model):
@@ -34,8 +48,8 @@ class Doctor(models.Model):
         related_name="doctors",
     )
     is_active = models.BooleanField(default=True)
-    # Clinic-wide timezone; kept on the doctor for clarity in APIs/admin.
-    timezone = models.CharField(max_length=64, default="Asia/Karachi")
+    # Per-doctor display timezone; blank falls back to settings.CLINIC_TIMEZONE in APIs.
+    timezone = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         ordering = ["name"]
